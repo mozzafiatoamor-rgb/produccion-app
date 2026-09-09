@@ -5,29 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#111a12">
 <title>Produccion App</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0d1117;
-  --surface:#151b26;
-  --surface2:#1c2333;
-  --surface3:#283040;
-  --accent:#e87a2e;
-  --accent-soft:rgba(232,122,46,.12);
-  --accent-hover:#f08a3e;
-  --green:#4ade80;
-  --red:#fb7185;
-  --yellow:#fbbf24;
-  --blue:#7dd3fc;
-  --text:#f2f2fa;
-  --text2:#8c95a8;
-  --text3:#5e6878;
+  --bg:#111a12;
+  --surface:#19241a;
+  --surface2:#212d22;
+  --surface3:#2c3a2d;
+  --accent:#e8862e;
+  --accent-soft:rgba(232,134,46,.15);
+  --accent-hover:#f0963e;
+  --green:#5eead4;
+  --red:#f87171;
+  --yellow:#fcd34d;
+  --blue:#93c5fd;
+  --text:#f5f5f0;
+  --text2:#a0a89a;
+  --text3:#6b7a68;
   --radius:14px;
   --shadow:0 2px 12px rgba(0,0,0,.35);
-  --border:rgba(255,255,255,.05)
+  --border:rgba(255,255,255,.07)
 }
 html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);height:100%;overflow:hidden;overscroll-behavior:none;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;line-height:1.5;letter-spacing:-.01em}
 
@@ -41,7 +41,7 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 .status-right{display:flex;align-items:center;gap:8px}
 .user-badge{display:flex;align-items:center;gap:7px;background:var(--surface2);padding:5px 12px 5px 6px;border-radius:10px;font-size:12px;color:var(--text2);cursor:pointer;border:1px solid var(--border);font-family:inherit;transition:border-color .2s}
 .user-badge:active{border-color:var(--accent)}
-.user-avatar{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#d4651e);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.user-avatar{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#c96e1e);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
 .user-name{font-weight:600;color:var(--text);font-size:12px}
 .config-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text2);width:36px;height:36px;border-radius:10px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .2s}
 .config-btn:active{border-color:var(--accent);color:var(--text)}
@@ -61,7 +61,7 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 .stat-box{background:var(--surface2);border-radius:12px;padding:16px;text-align:center;position:relative;overflow:hidden;border:1px solid var(--border)}
 .stat-box::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:3px 3px 0 0}
 .stat-box.orange::before{background:linear-gradient(90deg,var(--accent),#f09a4e)}
-.stat-box.green::before{background:linear-gradient(90deg,#22c55e,var(--green))}
+.stat-box.green::before{background:linear-gradient(90deg,#2dd4a8,var(--green))}
 .stat-box.blue::before{background:linear-gradient(90deg,#3b82f6,var(--blue))}
 .stat-box.red::before{background:linear-gradient(90deg,#ef4444,var(--red))}
 .stat-number{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;line-height:1.1;letter-spacing:-.02em}
@@ -100,10 +100,10 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 /* ── Buttons ── */
 .btn{width:100%;padding:15px;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;transition:transform .1s,opacity .2s;letter-spacing:-.01em}
 .btn:active{transform:scale(.97)}
-.btn-primary{background:linear-gradient(135deg,var(--accent),#d4651e);color:#fff;box-shadow:0 4px 16px rgba(232,122,46,.25)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#c96e1e);color:#fff;box-shadow:0 4px 16px rgba(232,122,46,.25)}
 .btn-primary:disabled{opacity:.35;box-shadow:none}
 .btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.btn-success{background:linear-gradient(135deg,#22c55e,var(--green));color:#0c0c14}
+.btn-success{background:linear-gradient(135deg,#2dd4a8,var(--green));color:#0c0c14}
 .btn-danger{background:linear-gradient(135deg,#ef4444,var(--red));color:#fff}
 .btn-sm{padding:10px 16px;font-size:13px;width:auto;border-radius:10px}
 
@@ -126,7 +126,7 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 .cart-divider{height:1px;background:var(--border);margin:16px 0}
 
 /* ── Modal ── */
-.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(6,10,18,.8);backdrop-filter:blur(12px);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(8,14,8,.82);backdrop-filter:blur(12px);z-index:200;display:none;align-items:flex-end;justify-content:center}
 .modal-overlay.active{display:flex}
 .modal{background:var(--surface);width:100%;max-width:500px;border-radius:20px 20px 0 0;padding:24px 20px 40px;max-height:90vh;overflow-y:scroll;-webkit-overflow-scrolling:touch;touch-action:pan-y;animation:slideModal .3s ease;border-top:1px solid rgba(255,255,255,.08)}
 @keyframes slideModal{from{transform:translateY(100%)}to{transform:translateY(0)}}
@@ -183,7 +183,7 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 .uib-name{font-weight:600}.uib-role{font-size:11px;color:var(--text2)}
 
 /* ── Working overlay ── */
-.working-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(8,12,18,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;backdrop-filter:blur(12px)}
+.working-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(10,16,10,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;backdrop-filter:blur(12px)}
 .working-overlay img{max-width:120px;max-height:60px;object-fit:contain}
 .working-overlay .working-text{font-size:15px;font-weight:700;color:var(--text);text-align:center;max-width:260px;line-height:1.5}
 .working-overlay .working-sub{font-size:12px;color:var(--text2);text-align:center}
@@ -390,7 +390,7 @@ function renderAdminTurnoDetail(turno){var apertura=getApertura(turno);var preci
 async function adminResetPhase(turno,fase){if(!confirm('\u00bfResetear fase '+fase+' del turno '+turno+'?'))return;showWorking();if(fase==='precierre'){await saveTurnoRecord(turno,'precierre',null);toast('Pre-cierre eliminado')}else if(fase==='cierre'){await saveTurnoRecord(turno,'cierre',null);await saveTurnoRecord(turno,'precierre',null);toast('Cierre eliminado, turno reabierto')}await logAction('Admin reset '+fase,'Turno '+turno+' — fase '+fase+' reseteada por admin','admin_reset');hideWorking();render()}
 async function adminResetAll(turno){if(!confirm('\u00bfResetear turno '+turno+' completamente?'))return;showWorking();await Promise.allSettled([saveTurnoRecord(turno,'apertura',null),saveTurnoRecord(turno,'precierre',null),saveTurnoRecord(turno,'cierre',null)]);await logAction('Admin reset completo','Turno '+turno+' reseteado completamente por admin','admin_reset');toast('Turno '+turno+' reseteado');hideWorking();render()}
 function renderBit(){let d=S.bitacora;if(S.filterDate==='semana')d=d.filter(b=>isThisWeek(b.fecha));else if(S.filterDate)d=d.filter(b=>b.fecha===S.filterDate);const q=S.searchQuery.toLowerCase();if(q)d=d.filter(b=>b.accion.toLowerCase().includes(q)||b.detalle.toLowerCase().includes(q)||b.usuario.toLowerCase().includes(q));const total=S.bitacoraTotal||0;const warnBanner=total>=500?`<div style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px"><div style="font-size:20px">\u26a0\ufe0f</div><div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--red)">\u{1F4DC} Bit\u00e1cora con ${total} registros</div><div style="font-size:11px;color:var(--text2)">Recomienda limpiar \u2014 abre Google Sheets, selecciona las filas m\u00e1s antiguas de la pesta\u00f1a "\u{1F4DC} Bit\u00e1cora" y elim\u00ednalas manualmente para mantener solo las ${total>=1800?'1,000 m\u00e1s recientes':'500 m\u00e1s recientes'}.</div></div></div>`:'';return warnBanner+`<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center"><span class="card-title" style="margin:0">\u{1F4DC} Bit\u00e1cora</span><span style="font-size:11px;color:${total>=500?'var(--red)':'var(--text2)'};font-family:JetBrains Mono">${total} registros</span></div><div style="display:flex;gap:8px;margin-bottom:10px"><div class="tab-pills" style="flex:1;margin:0"><button class="tab-pill ${S.filterDate===today()?'active':''}" onclick="S.filterDate=today();render()">Hoy</button><button class="tab-pill ${S.filterDate==='semana'?'active':''}" onclick="S.filterDate='semana';render()">Semana</button></div><input type="date" class="form-input" style="width:140px;padding:7px 10px;font-size:12px" value="${S.filterDate?dateToISO(S.filterDate):''}" onchange="S.filterDate=this.value?isoToDate(this.value):'';render()"></div><div class="search-bar"><span>\u{1F50D}</span><input placeholder="Buscar usuario, acci\u00f3n..." value="${S.searchQuery}" oninput="S.searchQuery=this.value;filterResults()"></div><div id="resultsList">${renderBitList(d)}</div>`}
-function renderBitList(f){return!f.length?'<div class="empty-state"><div class="empty-icon">\u{1F4DC}</div><p>Sin registros</p></div>':f.map(b=>{var parts=b.detalle.split(' \u2502 ');var main=parts[0]||'';var stock=parts[1]||'';var tipColor=b.tipo==='admin'||b.tipo==='admin_reset'?'var(--red)':b.tipo==='turno_reabierto'?'var(--yellow)':b.tipo==='correccion_apertura'?'var(--blue)':'var(--text3)';return`<div class="record-item" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><div style="font-size:14px;font-weight:600;color:var(--text);line-height:1.4;flex:1">${b.accion}</div><span style="font-size:10px;padding:2px 8px;border-radius:5px;background:rgba(255,255,255,.06);color:${tipColor};font-weight:600;white-space:nowrap;margin-left:8px">${b.tipo||"log"}</span></div><div style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:8px;word-break:break-word">${main}</div>${stock?'<div style="font-size:12px;background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-family:JetBrains Mono,monospace;color:var(--accent);line-height:1.4;border:1px solid var(--border)">\u{1F4E6} '+stock+'</div>':''}<div style="display:flex;gap:14px;font-size:12px;color:var(--text3);flex-wrap:wrap"><span>\u{1F4C5} ${b.fecha}</span><span>\u{1F552} ${b.hora}</span><span style="color:var(--text2)">\u{1F464} ${b.usuario}</span></div></div>`}).join('')}
+function renderBitList(f){return!f.length?'<div class="empty-state"><div class="empty-icon">\u{1F4DC}</div><p>Sin registros</p></div>':f.map(b=>{var parts=b.detalle.split(' \u2502 ');var main=parts[0]||'';var stock=parts[1]||'';var tipColor=b.tipo==='admin'||b.tipo==='admin_reset'?'var(--red)':b.tipo==='turno_reabierto'?'var(--yellow)':b.tipo==='correccion_apertura'?'var(--blue)':'var(--accent)';return`<div style="background:var(--surface2);border-radius:12px;padding:16px 18px;margin-bottom:10px;border:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:700;color:var(--text);line-height:1.3;flex:1">${b.accion}</div><span style="font-size:10px;padding:3px 10px;border-radius:6px;background:rgba(255,255,255,.08);color:${tipColor};font-weight:600;white-space:nowrap;margin-left:10px">${b.tipo||'log'}</span></div><div style="font-size:14px;color:var(--text);opacity:.85;line-height:1.6;margin-bottom:10px;word-break:break-word">${main}</div>${stock?'<div style="font-size:13px;background:var(--surface3);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-family:JetBrains Mono,monospace;color:var(--accent);line-height:1.4">\u{1F4E6} '+stock+'</div>':''}<div style="display:flex;gap:16px;font-size:12px;color:var(--text2);flex-wrap:wrap;opacity:.8"><span>\u{1F4C5} ${b.fecha}</span><span>\u{1F552} ${b.hora}</span><span>\u{1F464} ${b.usuario}</span></div></div>`}).join('')}
 
 function renderRep(){return`<div class="card-title" style="margin-bottom:14px">\u{1F4CA} Reportes</div><div class="tab-pills"><button class="tab-pill ${S.reportTab==='ventas'?'active':''}" onclick="S.reportTab='ventas';render()">Ventas</button><button class="tab-pill ${S.reportTab==='produccion'?'active':''}" onclick="S.reportTab='produccion';render()">Producci\u00f3n</button><button class="tab-pill ${S.reportTab==='resumen'?'active':''}" onclick="S.reportTab='resumen';render()">Resumen</button></div>${S.reportTab==='ventas'?repV():S.reportTab==='produccion'?repP():repR()}`}
 function repV(){if(!S.ventas.length)return'<div class="empty-state"><div class="empty-icon">\u{1F4B0}</div><p>Sin datos</p></div>';const b={};S.ventas.forEach(v=>{if(!b[v.producto])b[v.producto]={c:0,n:0};b[v.producto].c+=v.cantidad;b[v.producto].n++});return`<div class="card"><div class="card-header"><span class="card-title">Top Vendidos</span></div>${Object.entries(b).sort((a,c)=>c[1].c-a[1].c).map(([p,d],i)=>`<div class="report-row"><div><div style="font-size:14px;font-weight:500">${i+1}. ${p}</div><div style="font-size:11px;color:var(--text2)">${d.n} transacciones</div></div><div style="font-family:'JetBrains Mono';font-weight:700;color:var(--blue)">${d.c}</div></div>`).join('')}</div>`}
