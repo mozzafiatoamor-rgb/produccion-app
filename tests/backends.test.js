@@ -125,9 +125,9 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
 
   // ===== 3) SHEETS (default) no cambia =====
   ctx = await b.newContext(); pg = await ctx.newPage(); pg.on('pageerror', e => errs.push('gs: ' + e.message));
-  await pg.goto('http://localhost:8765/'); await pg.waitForSelector('.setup-title');
-  ok(await pg.evaluate(() => BACKEND === 'sheets' && DB === GS && document.querySelector('.setup-title').innerText.includes('Google Sheet')), 'sheets: por defecto sigue pidiendo Sheet ID (comportamiento actual)');
-  ok(await pg.evaluate(() => !document.body.innerText.includes('MODO DEMO')), 'sheets: sin banner');
+  await pg.goto('http://localhost:8765/?backend=sheets'); await pg.waitForSelector('.setup-title');
+  ok(await pg.evaluate(() => BACKEND === 'sheets' && DB === GS && document.querySelector('.setup-title').innerText.includes('Google Sheet')), 'sheets (?backend=sheets): sigue pidiendo Sheet ID como antes');
+  ok(await pg.evaluate(() => document.body.innerText.includes('GOOGLE SHEETS (respaldo)')), 'sheets (respaldo): muestra etiqueta naranja para no confundirse');
   // todas las hojas usadas por la app existen en TABLES
   const html = fs.readFileSync(ROOT + '/index.html', 'utf8');
   const names = [...html.matchAll(/Sheets\.(?:read|append|deleteRow)\(('[^']+')/g)].map(m => m[1]);
@@ -155,8 +155,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
     route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ success: !globalThis.__gsFail }) });
   });
   await pg.addInitScript(() => { localStorage.setItem('sheetId', 'SID'); localStorage.setItem('apiKey', 'KEY'); });
-  await pg.goto('http://localhost:8765/'); await pg.waitForSelector('#lu');
-  ok(await pg.evaluate(() => BACKEND === 'sheets' && DB === GS), 'gs: backend por defecto = Google Sheets');
+  await pg.goto('http://localhost:8765/?backend=sheets'); await pg.waitForSelector('#lu');
+  ok(await pg.evaluate(() => BACKEND === 'sheets' && DB === GS), 'gs: ?backend=sheets usa Google Sheets');
   ok(await pg.evaluate(() => S.usuarios.length === 2 && S.usuarios[1].rol === 'cocina' && S.usuarios[0].password === 'pw-admin'), 'gs: lee usuarios de la hoja (sin recursion)');
   ok(await pg.evaluate(async () => { await Sheets.loadAll(); return S.catalogo.length === 1 && S.catalogo[0].producto === 'Flan' && S.produccion[0].cantidad === 5 && S.inventario[0].stockActual === 5 }), 'gs: loadAll calcula catalogo e inventario');
   ok(await pg.evaluate(async () => { await Sheets.append('\u{1F4B0} Ventas', ['V1', '23/09/2026', 'x', 'Flan', 1, 'u', '']); await Sheets.deleteRow('\u{1F37D}️ Recetas', 7); return true }) && posts.length === 2 && posts[0].sheet === '\u{1F4B0} Ventas' && posts[0].values[3] === 'Flan' && posts[1].action === 'delete' && posts[1].row === 7, 'gs: append y deleteRow salen al Apps Script con el mismo formato de siempre');
@@ -165,6 +165,33 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => { GS.append = async () => { throw new Error('sin red') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V2', '23/09/2026', 'x', 'Flan', 1, 'u', '']) } catch (e) { } });
   ok(await pg.evaluate(() => _qCount() === 1), 'gs: sin red => cola local (comportamiento actual)');
+  await ctx.close();
+
+  // ===== 4) PRODUCCION: sin parametros ni configuracion previa => Supabase con la config incluida =====
+  ctx = await b.newContext(); pg = await ctx.newPage(); pg.on('pageerror', e => errs.push('prod: ' + e.message));
+  const seen = [];
+  await pg.route('https://ujmecfdsbqtwxusqqiqi.supabase.co/**', route => {
+    const r = route.request(); seen.push({ url: r.url(), h: r.headers() });
+    if (r.method() === 'OPTIONS') return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '[]' });
+  });
+  await pg.goto('http://localhost:8765/'); await pg.waitForSelector('#lu');
+  ok(await pg.evaluate(() => BACKEND === 'supabase' && DB === SBK && S.screen === 'login'), 'prod: sin configuracion previa arranca en Supabase y va directo al login (sin pedir Sheet ID)');
+  ok(await pg.evaluate(() => !document.body.innerText.includes('MODO DEMO') && !document.body.innerText.includes('respaldo') && !document.body.innerText.includes('pruebas')), 'prod: sin etiquetas de prueba');
+  const first = seen.find(x => x.url.includes('/rest/v1/rpc/app_list_users'));
+  ok(!!first && first.h['apikey'] === 'sb_publishable_XY_anhqYY9rhgZau67wkcw_WkMx_PRA' && first.h['accept-profile'] === 'produccion_app' && !first.h['authorization'], 'prod: usa el proyecto/llave publica/esquema produccion_app incluidos en la app (sin Authorization)');
+  ok(await pg.evaluate(() => ['sbUrl', 'sbKey', 'backend'].every(k => localStorage.getItem(k) === null)), 'prod: no necesita guardar nada en el dispositivo para funcionar');
+  // un telefono que venia usando Google Sheets (sheetId/apiKey/sesion guardados) pasa a Supabase sin pedir nada
+  await ctx.close(); ctx = await b.newContext(); pg = await ctx.newPage(); pg.on('pageerror', e => errs.push('prod2: ' + e.message));
+  await pg.route('https://ujmecfdsbqtwxusqqiqi.supabase.co/**', route => {
+    const r = route.request(); if (r.method() === 'OPTIONS') return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    const rows = r.url().includes('app_list_users') ? [{ id: 'U2', usuario: 'ENCARGADO1', nombre: 'EUCEBIO', rol: 'cocina' }] : [];
+    route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(rows) });
+  });
+  await pg.addInitScript(() => { if (!localStorage.getItem('_init')) { localStorage.setItem('_init', '1'); localStorage.setItem('sheetId', 'VIEJO'); localStorage.setItem('apiKey', 'VIEJA'); localStorage.setItem('currentUser', JSON.stringify({ id: 'U2', usuario: 'ENCARGADO1', nombre: 'EUCEBIO', rol: 'cocina' })); localStorage.setItem('_pendingQ', JSON.stringify([{ sh: '\u{1F4B0} Ventas', v: ['V1', '23/09/2026', 'x', 'Flan', 1, 'u', ''], ts: 1 }])); } });
+  await pg.goto('http://localhost:8765/'); await pg.waitForTimeout(1200);
+  ok(await pg.evaluate(() => BACKEND === 'supabase' && S.screen === 'main' && S.currentUser.usuario === 'ENCARGADO1' && S.currentUser.rol === 'cocina'), 'prod: telefono que usaba Sheets conserva su sesion (rol cocina) y entra directo a la app en Supabase');
+  ok(await pg.evaluate(() => _qCount() === 1), 'prod: la cola offline pendiente de Sheets se conserva (se reintentara contra Supabase)');
   await ctx.close();
   ok(errs.length === 0, 'sin errores JS de pagina ' + JSON.stringify(errs));
   await b.close(); server.close();

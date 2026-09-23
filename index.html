@@ -207,12 +207,14 @@ const LOGO='logo.png',SCRIPT_URL='https://script.google.com/macros/s/AKfycbw6udH
 const S={screen:'setup',setupStep:1,tab:'home',sheetId:localStorage.getItem('sheetId')||'',apiKey:localStorage.getItem('apiKey')||'',connected:false,currentUser:null,usuarios:[],catalogo:[],produccion:[],ventas:[],mermas:[],recetas:[],inventario:[],stockBajo:[],bitacora:[],turnos:[],loading:false,searchQuery:'',invView:'stock',cierreTurno:null,reportTab:'ventas',filterDate:'',viewMode:'resumen',ventasView:'normal',waNumber:localStorage.getItem('waNumber')||'529832079693',waReminder:localStorage.getItem('waReminder')||'obligatorio',catFilterTPV:'todos'};
 /* ===== CAPA DE DATOS · backends intercambiables: sheets | demo | supabase =====
    Toda la app sigue llamando Sheets.read/append/deleteRow con nombres de hoja y
-   filas-arreglo. Cada backend traduce a su almacenamiento. Por defecto = 'sheets'
-   (comportamiento actual). Cambiar con ?backend=demo | supabase | sheets  (se recuerda).
+   filas-arreglo. Cada backend traduce a su almacenamiento. Por defecto = 'supabase'
+   (respaldo). Cambiar con ?backend=demo | supabase | sheets  (se recuerda en ese dispositivo).
    Supabase: ?sburl=https://xxxx.supabase.co&sbkey=<anon key>[&sbschema=produccion_app]  (se recuerda).
    Los datos viven en un esquema propio (no en public) para convivir con otros proyectos. */
-const BACKEND=(function(){var m='sheets';try{var p=new URLSearchParams(location.search);var q=p.get('backend');if(q&&['sheets','demo','supabase'].indexOf(q)>-1)localStorage.setItem('backend',q);if(p.get('sburl'))localStorage.setItem('sbUrl',p.get('sburl'));if(p.get('sbkey'))localStorage.setItem('sbKey',p.get('sbkey'));if(p.get('sbschema'))localStorage.setItem('sbSchema',p.get('sbschema'));m=localStorage.getItem('backend')||'sheets'}catch(e){}return['sheets','demo','supabase'].indexOf(m)>-1?m:'sheets'})();
-const SB_URL=(localStorage.getItem('sbUrl')||'').replace(/\/+$/,''),SB_KEY=localStorage.getItem('sbKey')||'',SB_SCHEMA=localStorage.getItem('sbSchema')||'produccion_app';
+const BACKEND=(function(){var m='supabase';try{var p=new URLSearchParams(location.search);var q=p.get('backend');if(q&&['sheets','demo','supabase'].indexOf(q)>-1)localStorage.setItem('backend',q);if(p.get('sburl'))localStorage.setItem('sbUrl',p.get('sburl'));if(p.get('sbkey'))localStorage.setItem('sbKey',p.get('sbkey'));if(p.get('sbschema'))localStorage.setItem('sbSchema',p.get('sbschema'));m=localStorage.getItem('backend')||'supabase'}catch(e){}return['sheets','demo','supabase'].indexOf(m)>-1?m:'supabase'})();
+/* Config de produccion (la llave 'publishable' es PUBLICA por diseno; la seguridad la dan las politicas RLS de supabase/schema.sql). Se puede sobreescribir con ?sburl= &sbkey= */
+const SB_URL_DEFAULT='https://ujmecfdsbqtwxusqqiqi.supabase.co',SB_KEY_DEFAULT='sb_publishable_XY_anhqYY9rhgZau67wkcw_WkMx_PRA';
+const SB_URL=(localStorage.getItem('sbUrl')||SB_URL_DEFAULT).replace(/\/+$/,''),SB_KEY=localStorage.getItem('sbKey')||SB_KEY_DEFAULT,SB_SCHEMA=localStorage.getItem('sbSchema')||'produccion_app';
 /* Mapa hoja -> tabla Supabase. Tipos: s=texto i=entero n=numero d=fecha b=SI/NO. Mantener igual que supabase/schema.sql y migration/tables.mjs */
 function _T(t,c){return{t:t,c:c.map(function(x){var p=x.split(':');return{n:p[0],k:p[1]||'s'}})}}
 const TABLES={
@@ -276,7 +278,7 @@ const SBK={
 };
 const DB=BACKEND==='supabase'?SBK:BACKEND==='demo'?DEMO:GS;
 /* Aviso visible cuando NO se usa Google Sheets (evita confundir datos de prueba con reales) */
-(function(){if(BACKEND==='sheets')return;var b=document.createElement('div');b.style.cssText='position:fixed;left:8px;bottom:8px;z-index:9999;font:600 11px system-ui;padding:4px 10px;border-radius:12px;background:'+(BACKEND==='demo'?'#fbbf24':'#3b82f6')+';color:#000;opacity:.9;pointer-events:none';b.textContent=BACKEND==='demo'?'\u{1F9EA} MODO DEMO · datos locales':'☁️ SUPABASE (pruebas)';document.body.appendChild(b)})();
+(function(){if(BACKEND==='supabase')return;var b=document.createElement('div');b.style.cssText='position:fixed;left:8px;bottom:8px;z-index:9999;font:600 11px system-ui;padding:4px 10px;border-radius:12px;background:'+(BACKEND==='demo'?'#fbbf24':'#fb923c')+';color:#000;opacity:.9;pointer-events:none';b.textContent=BACKEND==='demo'?'\u{1F9EA} MODO DEMO · datos locales':'\u{1F4C4} GOOGLE SHEETS (respaldo)';document.body.appendChild(b)})();
 const Sheets={
   async read(sh,rg){return DB.read(sh,rg)},
   async append(sh,v){try{return await DB.append(sh,v)}catch(e){_qAdd(sh,v);throw e}},
