@@ -60,6 +60,7 @@ idéntico antes y después). Protecciones:
 1. **Diagnóstico**: pegar `supabase/00_diagnostico.sql` en *SQL Editor* y revisar el resultado (¿existe ya el esquema? ¿dónde está pgcrypto? ¿qué esquemas expone la API?).
 2. **Respaldo** del proyecto compartido antes de instalar (Database → Backups, o `pg_dump`). En plan Free no hay respaldos automáticos.
 3. Pegar `supabase/schema.sql` en *SQL Editor* → Run. Agregar `produccion_app` a *Exposed schemas*.
+3a. Si `schema.sql` se ejecutó **antes** del 23-sep (versión sin `app_verify_admin` y con CHECK de roles), ejecutar también `supabase/patches/001_roles_y_verificar_admin.sql`. En instalaciones nuevas no hace falta.
 3b. **Verificar la conexión** (solo lectura, con la llave pública): en `migration/.env` poner `SUPABASE_URL` y `SUPABASE_ANON_KEY`, y correr `node migration/check.mjs`. Todo debe salir ✓ antes de seguir.
 4. `cp migration/.env.example migration/.env` y llenar `GOOGLE_SHEET_ID`, `GOOGLE_API_KEY`
    (los mismos que usa la app; solo lectura), `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`
@@ -76,8 +77,13 @@ idéntico antes y después). Protecciones:
     re-ejecutar export/import (esquema limpio con `uninstall.sql` + `schema.sql`), y recién ahí definir los
     valores por defecto (`sburl`/`sbkey`) y hacer merge a `main`. La hoja queda como respaldo de solo lectura.
 
+## Hallazgos del export (datos reales, 23-sep-2026)
+
+Filas: usuarios 3, catálogo 28, producción 692, ventas 10,042, recetas 371, mermas 125, bitácora 114, turnos 26, saldo inicial 0. Fechas todas `dd/mm/aaaa` (0 avisos). Roles reales: `admin` y `cocina` (por eso el esquema no limita roles). Catálogo con `SI` y `Sí` (ambos = activo, igual que la app). Hay IDs repetidos (p. ej. ~8,700 en ventas): por eso `id` no es único en el esquema.
+
 ## Decisiones / riesgos pendientes (para revisar antes de aprobar)
 
+0. **Fuerza bruta**: `app_login` / `app_verify_admin` son públicas (necesario para el login). No limitan intentos; usar contraseñas largas o pasar a Supabase Auth (fase 2).
 1. **Seguridad**: la llave `anon` irá en el navegador, y las políticas RLS actuales dejan
    leer/insertar datos operativos a quien tenga la llave (igual de abierto que hoy con el Apps
    Script, pero ya sin contraseñas expuestas). Fase 2 recomendada: Supabase Auth + políticas por rol.
