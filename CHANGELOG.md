@@ -9,9 +9,15 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 - Capa de datos con backends intercambiables (`sheets` por defecto, `demo`, `supabase`) en `index.html`.
 - `supabase/schema.sql`: tablas equivalentes a las hojas, RLS y funciones `app_login`, `app_list_users`, `admin_upsert_user`.
 - `migration/`: script `export` / `import` / `verify` (Sheets → Supabase) con validaciones y reporte de avisos.
-- `tests/backends.test.js`: 31 comprobaciones de los 3 backends (mock local de Supabase).
+- `tests/backends.test.js`: comprobaciones de los 3 backends (mock local de Supabase).
 - `docs/MIGRACION_SUPABASE.md`: guía, plan por pasos y riesgos abiertos.
 - `.gitignore` (datos exportados y `.env` fuera de git).
+
+### Cambiado (proyecto Supabase compartido)
+- `supabase/schema.sql` ahora instala en un esquema propio `produccion_app` (antes `public`), con guarda que aborta ante un esquema ajeno y `grant`s limitados a ese esquema; agrega `notify pgrst, 'reload schema'`.
+- Nuevos `supabase/00_diagnostico.sql` (solo lectura) y `supabase/uninstall.sql` (borra solo `produccion_app`).
+- App y `migrate.mjs` envían `Accept-Profile`/`Content-Profile` (config `sbschema` / `SUPABASE_SCHEMA`); las llaves no-JWT (`sb_publishable_`, `sb_secret_`) van solo en `apikey`.
+- Pruebas: 33 comprobaciones (verifican perfil de esquema y ausencia de `Authorization` con llave no-JWT).
 
 ### Cambiado
 - `Sheets.read/append/deleteRow` y `retryQueue` ahora delegan al backend activo (comportamiento idéntico en `sheets`).
