@@ -7,8 +7,8 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 
 ### Cambiado (solo aspecto; los datos y la lógica no se tocan)
 - Nuevo tema oscuro **azul**: fondo azul marino con destellos ambientales (azul, violeta, cian), tarjetas de cristal, textos y bordes en azul, complementarios cian / violeta / naranja / menta / rosa.
-- **Accesos rápidos neón**: cada botón tiene su color, resplandor que "respira", foco de luz que sigue al puntero, barrido de brillo al pasar y onda al tocar.
-- **Dock de navegación**: la barra inferior desaparece; queda un solo botón circular con halo neón que al tocarlo se despliega en un panel de 2 columnas (con la sección actual iluminada), animación escalonada de resorte, inclinación suave y foco de luz al pasar el puntero, y se pliega al elegir sección, tocar fuera o con Esc. Respeta `prefers-reduced-motion`.
+- **Accesos rápidos**: borde fino de su color y una luz suave solo por **debajo** del botón (sin brillo en iconos ni textos, sin animaciones de parpadeo); foco tenue que sigue al puntero y onda discreta al tocar.
+- **Dock de navegación**: la barra inferior desaparece; queda un solo botón circular sólido que al tocarlo se despliega en un panel de 2 columnas (con la sección actual iluminada), animación escalonada de resorte, inclinación suave y foco de luz al pasar el puntero, y se pliega al elegir sección, tocar fuera o con Esc. Respeta `prefers-reduced-motion`.
 - El contenido usa la altura completa (ya no hay barra de 72 px) y deja espacio para el botón. La etiqueta MODO DEMO / respaldo se hizo más pequeña para no chocar con el dock.
 - `manifest.json` y `theme-color` en azul marino.
 - Pruebas: 86 → 98 comprobaciones (dock plegado/desplegado, Escape, tocar fuera, navegar, sección activa, colores neón, espacio para el botón).
