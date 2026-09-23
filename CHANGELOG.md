@@ -13,6 +13,11 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 - `docs/MIGRACION_SUPABASE.md`: guía, plan por pasos y riesgos abiertos.
 - `.gitignore` (datos exportados y `.env` fuera de git).
 
+### Corte a Supabase (preparado, pendiente de publicar en `main`)
+- Supabase pasa a ser el backend **por defecto** (URL, llave pública y esquema `produccion_app` incluidos en `index.html`). `?backend=sheets` vuelve a Google Sheets en ese dispositivo (etiqueta naranja); `demo` conserva su etiqueta; producción no muestra etiquetas.
+- `migrate.mjs import --replace --yes-vaciar-produccion_app`: vacía solo `produccion_app` y reimporta (se niega con `public` o sin confirmación).
+- `docs/CORTE_A_SUPABASE.md`: checklist del corte y de vuelta atrás. 49 pruebas (incluye teléfono que venía de Sheets con sesión y cola offline pendiente).
+
 ### Migración de datos (23-sep-2026, proyecto Supabase de Gustavo, esquema `produccion_app`)
 - Importadas 11,400 filas desde la hoja real; `verify` = conteos y sumas idénticos (producción 12,996, ventas 20,685, mermas 395, recetas 419.5).
 - Prueba de aceptación: la app calculando desde Google Sheets (export) y desde Supabase da resultados idénticos en producción, ventas, mermas, recetas, inventario (28 productos), stock bajo (12), bitácora y turnos. Única diferencia cosmética: catálogo `activo` "SÍ" (hoja) vs "SI" (Supabase); la app solo lo usa como `!== 'NO'`.
