@@ -40,7 +40,7 @@ create table if not exists produccion_app.usuarios (
   usuario       text not null unique,
   password_hash text,                       -- bcrypt; nunca texto plano
   nombre        text not null default '',
-  rol           text not null default 'usuario' check (rol in ('admin','usuario')),
+  rol           text not null default 'usuario',   -- 'admin', 'cocina', etc. (la app decide que hace cada rol)
   created_at    timestamptz not null default now()
 );
 
@@ -224,6 +224,21 @@ as $$
   limit 1
 $$;
 
+-- Verifica la contraseña de un ADMIN en el servidor (la app la pide para reabrir
+-- turnos y aplicar correcciones). Devuelve el admin si coincide; vacio si no.
+create or replace function produccion_app.app_verify_admin(p_password text)
+returns table (id text, usuario text, nombre text, rol text)
+language sql security definer set search_path = produccion_app, extensions, pg_temp
+as $$
+  select u.id, u.usuario, u.nombre, u.rol
+  from produccion_app.usuarios u
+  where u.rol = 'admin'
+    and coalesce(p_password, '') <> ''
+    and u.password_hash is not null
+    and u.password_hash = crypt(p_password, u.password_hash)
+  limit 1
+$$;
+
 -- Alta/cambio de usuario con contraseña hasheada. SOLO service_role
 -- (lo usa el script de migración y el panel de Supabase; nunca el navegador).
 create or replace function produccion_app.admin_upsert_user(
@@ -234,7 +249,7 @@ as $$
 begin
   insert into produccion_app.usuarios (id, usuario, password_hash, nombre, rol)
   values (p_id, p_usuario, crypt(p_password, gen_salt('bf')), coalesce(p_nombre,''),
-          case when lower(p_rol) = 'admin' then 'admin' else 'usuario' end)
+          coalesce(nullif(lower(trim(p_rol)), ''), 'usuario'))
   on conflict (usuario) do update
     set id = excluded.id, password_hash = excluded.password_hash,
         nombre = excluded.nombre, rol = excluded.rol;
@@ -244,8 +259,10 @@ revoke all on function produccion_app.admin_upsert_user(text,text,text,text,text
 grant execute on function produccion_app.admin_upsert_user(text,text,text,text,text) to service_role;
 revoke all on function produccion_app.app_login(text,text)  from public;
 revoke all on function produccion_app.app_list_users()      from public;
+revoke all on function produccion_app.app_verify_admin(text)  from public;
 grant execute on function produccion_app.app_login(text,text) to anon;
 grant execute on function produccion_app.app_list_users()     to anon;
+grant execute on function produccion_app.app_verify_admin(text) to anon;
 
 -- Que PostgREST (la API) vea el esquema/tablas nuevas sin reiniciar
 notify pgrst, 'reload schema';
