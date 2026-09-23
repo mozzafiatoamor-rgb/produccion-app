@@ -27,6 +27,7 @@ const server = http.createServer((req, res) => {
       const t = p; const rows = tbl(t);
       if (req.method === 'POST') { const r = JSON.parse(body); r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); return json(res, 201, {}); }
       if (req.method === 'GET') { const off = +u.searchParams.get('offset') || 0, lim = Math.min(+u.searchParams.get('limit') || 1000, 1000); return json(res, 200, rows.slice(off, off + lim)); }
+      if (req.method === 'PATCH') { const id = +u.searchParams.get('seq').replace('eq.', ''); const r = rows.find(x => x.seq === id); if (!r) return json(res, 200, []); const b = JSON.parse(body); if (Object.keys(b).some(k => !['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'].includes(k))) return json(res, 403, { message: 'columna no permitida' }); Object.assign(r, b); return json(res, 200, [r]); }
       if (req.method === 'DELETE') { const id = +u.searchParams.get('seq').replace('eq.', ''); const i = rows.findIndex(r => r.seq === id); if (i < 0) return json(res, 200, []); const [d] = rows.splice(i, 1); return json(res, 200, [d]); }
       json(res, 404, {});
     }); return;
@@ -61,6 +62,11 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await Sheets.deleteRow('\u{1F37D}️ Recetas', 2); await Sheets.loadAll(); });
   ok(await pg.evaluate(() => S.recetas.length === 1 && S.recetas[0].ingrediente === 'Huevo'), 'demo: deleteRow recetas');
   ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('admin123'))?.nombre === 'Administrador' && (await Sheets.verifyAdmin('')) === null && (await Sheets.verifyAdmin('demo123')) === null && (await Sheets.verifyAdmin('x')) === null), 'demo: verifyAdmin acepta admin, rechaza vacia / usuario normal / incorrecta');
+  // administrador de catalogo (demo)
+  const dc = await pg.evaluate(async () => { await Sheets.loadAll(); return { todos: S.catalogoTodos.length, act: S.catalogo.length } });
+  ok(dc.todos === 4 && dc.act === 4, 'demo: catalogoTodos incluye todos los productos (' + JSON.stringify(dc) + ')');
+  ok(await pg.evaluate(async () => { const r = S.catalogoTodos[0]; await Sheets.updateRow(CAT_SHEET, r._row, [r.id, r.categoria, r.producto, r.stockMinimo, r.unidad, 'NO']); await Sheets.loadAll(); return S.catalogo.length === 3 && S.catalogoTodos.length === 4 && S.catalogoTodos[0].activo === 'NO' }), 'demo: updateRow desactiva un producto (sale de catalogo, sigue en catalogoTodos)');
+  ok(await pg.evaluate(async () => { try { await Sheets.updateRow(CAT_SHEET, 999, ['x', 'y', 'z', 0, '', 'SI']); return false } catch (e) { return true } }), 'demo: updateRow de fila inexistente lanza error');
   // cola offline con backend demo: fallo forzado
   await pg.evaluate(() => { DEMO.append = async () => { throw new Error('x') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V9', today(), 'x', 'y', 1, 'z', '']) } catch (e) { } });
@@ -115,6 +121,49 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => { SBK.req = window._orig; });
   await pg.evaluate(async () => { await retryQueue() }); await pg.waitForTimeout(500);
   ok(await pg.evaluate(() => _qCount() === 0) && DBM.ventas.length === cnt0 + 1, 'sb: retryQueue sincroniza por Supabase');
+  // ---- administrador de catalogo (solo admin) ----
+  pg.on('dialog', d => d.accept());
+  const nPatch = () => log.filter(l => l.startsWith('PATCH')).length;
+  await pg.evaluate(async () => { await Sheets.append('\u{1F4E6} Catálogo', ['C3', 'Postres', 'Cheesecake', '1', 'pza', 'SI']); await Sheets.loadAll(); });
+  ok(await pg.evaluate(() => S.catalogoTodos.length === 3 && S.catalogo.length === 2 && S.catalogoTodos[1].activo === 'NO' && S.catalogoTodos[1]._row === 3), 'cat/sb: catalogoTodos trae activos e inactivos con su fila');
+  await pg.evaluate(() => openModal('catalogo'));
+  const mh = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(mh.includes('Catálogo de productos') && mh.includes('Viejo') && mh.includes('Inactivo') && mh.includes('Todos (3)') && mh.includes('Activos (2)') && mh.includes('Inactivos (1)'), 'cat/sb: el modal lista productos con estado y contadores');
+  await pg.evaluate(() => { S.cmF = 'inactivos'; cmRefresh() });
+  ok(await pg.evaluate(() => { const t = document.getElementById('cmList').innerText; return t.includes('Viejo') && !t.includes('Cheesecake') }), 'cat/sb: filtro Inactivos');
+  await pg.evaluate(() => { S.cmF = 'todos'; S.cmQ = 'viej'; cmRefresh() });
+  ok(await pg.evaluate(() => { const t = document.getElementById('cmList').innerText; return t.includes('Viejo') && !t.includes('Cheesecake') }), 'cat/sb: busqueda');
+  await pg.evaluate(() => { S.cmQ = ''; cmRefresh() });
+  await pg.evaluate(async () => { await cmToggle(3) });
+  ok(DBM.catalogo[1].activo === true && await pg.evaluate(() => S.catalogo.length === 3 && S.catalogo.some(p => p.producto === 'Viejo')), 'cat/sb: activar -> PATCH activo=true y reaparece en el catalogo activo');
+  ok(DBM.bitacora.some(b => /Producto activado/.test(JSON.stringify(b))), 'cat/sb: la accion queda en la bitacora');
+  await pg.evaluate(async () => { await cmToggle(3) });
+  ok(DBM.catalogo[1].activo === false && await pg.evaluate(() => S.catalogo.length === 2 && !S.inventario.some(p => p.producto === 'Viejo')), 'cat/sb: desactivar (con confirmacion) -> sale del catalogo e inventario');
+  ok(DBM.catalogo[1].producto === 'Viejo' && DBM.catalogo.length === 3 && DBM.produccion.length === 1, 'cat/sb: no se borra ni duplica nada, historial intacto');
+  await pg.evaluate(() => { cmEdit(2) });
+  ok(await pg.evaluate(() => !!document.getElementById('cmEM') && document.getElementById('cmEC').value === 'Pasteles'), 'cat/sb: se abre el editor con los valores actuales');
+  await pg.evaluate(async () => { document.getElementById('cmEM').value = '7'; document.getElementById('cmEU').value = 'Kilos'; await cmSave(2) });
+  ok(DBM.catalogo[0].stock_minimo === 7 && DBM.catalogo[0].unidad === 'Kilos' && DBM.catalogo[0].categoria === 'Pasteles' && DBM.catalogo[0].producto === 'Cheesecake', 'cat/sb: editar guarda stock minimo/unidad y no toca el nombre');
+  ok(await pg.evaluate(() => S.catalogo.find(p => p.producto === 'Cheesecake' && p.categoria === 'Pasteles').stockMinimo === 7 && S.cmEdit === null), 'cat/sb: la app refleja lo guardado y cierra el editor');
+  const p0 = nPatch();
+  await pg.evaluate(() => { cmEdit(4) });
+  await pg.evaluate(async () => { document.getElementById('cmEC').value = 'Pasteles'; await cmSave(4) });
+  ok(DBM.catalogo[2].categoria === 'Postres' && nPatch() === p0, 'cat/sb: no permite duplicar producto+categoria');
+  await pg.evaluate(async () => { document.getElementById('cmEC').value = 'Postres'; document.getElementById('cmEM').value = '-3'; await cmSave(4) });
+  ok(DBM.catalogo[2].stock_minimo === 1 && nPatch() === p0, 'cat/sb: rechaza stock minimo negativo');
+  await pg.evaluate(async () => { document.getElementById('cmEM').value = '1'; await cmSave(4) });
+  ok(nPatch() === p0, 'cat/sb: sin cambios no manda nada al servidor');
+  ok(await pg.evaluate(() => nextId('PROD', S.catalogoTodos.concat([{ id: 'PROD0099' }])) === 'PROD0100' && isDup('viejo', 'pasteles')), 'cat/sb: isDup considera tambien los inactivos');
+  ok(log.some(l => /^PATCH catalogo\?seq=eq\.1 /.test(l)), 'cat/sb: PATCH por seq a la tabla catalogo');
+  await pg.evaluate(() => { window._u = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }); closeModal() });
+  const p1 = nPatch();
+  await pg.evaluate(async () => { openModal('catalogo'); await cmToggle(3) });
+  ok(await pg.evaluate(() => modalType !== 'catalogo') && nPatch() === p1, 'cat/sb: rol cocina no abre el catalogo ni puede cambiarlo');
+  await pg.evaluate(() => { S.currentUser = window._u; closeModal() });
+  await pg.evaluate(() => { window._o = SBK.req; SBK.req = async () => { throw new Error('offline') } });
+  await pg.evaluate(async () => { await cmToggle(2) });
+  await pg.evaluate(() => { SBK.req = window._o });
+  ok(DBM.catalogo[0].activo === true && await pg.evaluate(() => S.catalogo.some(p => p.producto === 'Cheesecake' && p.categoria === 'Pasteles')), 'cat/sb: si falla la red no cambia nada (ni en la DB ni en pantalla)');
   // paginacion: 2500 filas
   for (let i = 0; i < 2500; i++) tbl('mermas').push({ seq: (seqs.mermas = (seqs.mermas || 0) + 1), id: 'M' + i, fecha: '2026-09-01', hora: '', categoria: 'c', producto: 'Cheesecake', cantidad: 1, motivo: '', responsable: '' });
   const nm = await pg.evaluate(async () => (await Sheets.read('⚠️ Mermas', 'A2:H50000')).length);
@@ -162,6 +211,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(async () => { await Sheets.append('\u{1F4B0} Ventas', ['V1', '23/09/2026', 'x', 'Flan', 1, 'u', '']); await Sheets.deleteRow('\u{1F37D}️ Recetas', 7); return true }) && posts.length === 2 && posts[0].sheet === '\u{1F4B0} Ventas' && posts[0].values[3] === 'Flan' && posts[1].action === 'delete' && posts[1].row === 7, 'gs: append y deleteRow salen al Apps Script con el mismo formato de siempre');
   ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('pw-admin'))?.nombre === 'Gustavo' && (await Sheets.verifyAdmin('pw-coc')) === null && (await Sheets.verifyAdmin('')) === null), 'gs: verifyAdmin compara con la hoja; rol cocina no sirve; vacia rechazada');
   ok(await pg.evaluate(async () => (await Sheets.checkLogin('coc', 'pw-coc'))?.rol === 'cocina' && (await Sheets.checkLogin('coc', 'mala')) === undefined), 'gs: login conserva el rol cocina');
+  ok(await pg.evaluate(async () => { try { await Sheets.updateRow(CAT_SHEET, 2, ['a', 'b', 'c', 0, '', 'NO']); return false } catch (e) { return /Supabase/.test(e.message) } }) && posts.length === 2, 'gs: editar catalogo no esta disponible en modo Sheets (mensaje claro, no manda nada)');
+  ok(await pg.evaluate(async () => { await Sheets.loadAll(); return S.catalogoTodos.length === 2 && S.catalogo.length === 1 && S.catalogoTodos[0].activo === 'SÍ' }), 'gs: catalogoTodos tambien en modo Sheets; "Sí" cuenta como activo');
   await pg.evaluate(() => { GS.append = async () => { throw new Error('sin red') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V2', '23/09/2026', 'x', 'Flan', 1, 'u', '']) } catch (e) { } });
   ok(await pg.evaluate(() => _qCount() === 1), 'gs: sin red => cola local (comportamiento actual)');
