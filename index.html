@@ -205,10 +205,82 @@ html,body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(
 <script>
 const LOGO='logo.png',SCRIPT_URL='https://script.google.com/macros/s/AKfycbw6udHOPKq_A20Y53NCL1tnEgpl7_FNCqdP0ycjB7HQs6sltZttFPlpW_SrZd7FH6pZ/exec';
 const S={screen:'setup',setupStep:1,tab:'home',sheetId:localStorage.getItem('sheetId')||'',apiKey:localStorage.getItem('apiKey')||'',connected:false,currentUser:null,usuarios:[],catalogo:[],produccion:[],ventas:[],mermas:[],recetas:[],inventario:[],stockBajo:[],bitacora:[],turnos:[],loading:false,searchQuery:'',invView:'stock',cierreTurno:null,reportTab:'ventas',filterDate:'',viewMode:'resumen',ventasView:'normal',waNumber:localStorage.getItem('waNumber')||'529832079693',waReminder:localStorage.getItem('waReminder')||'obligatorio',catFilterTPV:'todos'};
+/* ===== CAPA DE DATOS · backends intercambiables: sheets | demo | supabase =====
+   Toda la app sigue llamando Sheets.read/append/deleteRow con nombres de hoja y
+   filas-arreglo. Cada backend traduce a su almacenamiento. Por defecto = 'sheets'
+   (comportamiento actual). Cambiar con ?backend=demo | supabase | sheets  (se recuerda).
+   Supabase: ?sburl=https://xxxx.supabase.co&sbkey=<anon key>  (se recuerda). */
+const BACKEND=(function(){var m='sheets';try{var p=new URLSearchParams(location.search);var q=p.get('backend');if(q&&['sheets','demo','supabase'].indexOf(q)>-1)localStorage.setItem('backend',q);if(p.get('sburl'))localStorage.setItem('sbUrl',p.get('sburl'));if(p.get('sbkey'))localStorage.setItem('sbKey',p.get('sbkey'));m=localStorage.getItem('backend')||'sheets'}catch(e){}return['sheets','demo','supabase'].indexOf(m)>-1?m:'sheets'})();
+const SB_URL=(localStorage.getItem('sbUrl')||'').replace(/\/+$/,''),SB_KEY=localStorage.getItem('sbKey')||'';
+/* Mapa hoja -> tabla Supabase. Tipos: s=texto i=entero n=numero d=fecha b=SI/NO. Mantener igual que supabase/schema.sql y migration/tables.mjs */
+function _T(t,c){return{t:t,c:c.map(function(x){var p=x.split(':');return{n:p[0],k:p[1]||'s'}})}}
+const TABLES={
+  '\u{1F464} Usuarios':_T('usuarios',['id','usuario','password_hash','nombre','rol']),
+  '\u{1F4E6} Catálogo':_T('catalogo',['id','categoria','producto','stock_minimo:i','unidad','activo:b']),
+  '\u{1F3ED} Producción':_T('produccion',['id','fecha:d','dia','turno','categoria','producto','cantidad:n','responsable','notas']),
+  '\u{1F4B0} Ventas':_T('ventas',['id','fecha:d','categoria','producto','cantidad:n','vendedor','notas']),
+  '\u{1F37D}️ Recetas':_T('recetas',['platillo','categoria','ingrediente','cantidad:n','unidad']),
+  '⚠️ Mermas':_T('mermas',['id','fecha:d','hora','categoria','producto','cantidad:n','motivo','responsable']),
+  '\u{1F4CA} Saldo Inicial':_T('saldo_inicial',['producto','categoria','stock_actual:n','total_producido:n','total_vendido:n','total_merma:n','fecha_corte:d']),
+  '\u{1F4DC} Bitácora':_T('bitacora',['fecha:d','hora','usuario','accion','detalle','tipo']),
+  '\u{1F512} Turnos':_T('turnos',['id','fecha:d','turno','fase','responsable','hora','datos'])
+};
+function _rg(rg){var m=/^[A-Za-z]+(\d+):[A-Za-z]+(\d+)$/.exec(rg||'');var s=m?+m[1]:2,e=m?+m[2]:50000;return{start:Math.max(s,2),end:Math.max(e,2)}}
+function _toDB(k,v){if(k==='i')return parseInt(v)||0;if(k==='n')return parseFloat(v)||0;if(k==='b')return String(v==null?'':v).trim().toUpperCase()!=='NO';if(k==='d'){var i=dateToISO(String(v==null?'':v).trim());return/^\d{4}-\d{2}-\d{2}$/.test(i)?i:null}return v==null?'':String(v)}
+function _fromDB(k,v){if(k==='d')return v?isoToDate(String(v).slice(0,10)):'';if(k==='b')return v===false?'NO':'SI';return v==null?'':String(v)}
+/* --- Backend 1: Google Sheets (lectura por API key, escritura por Apps Script) --- */
+const GS={
+  async read(sh,rg){return DB.read(sh,rg)},
+  async append(sh,v){const r=await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({sheet:sh,values:v})});const d=await r.json();if(!d.success)throw new Error(d.error);return d},
+  async deleteRow(sh,row){return DB.deleteRow(sh,row)},
+  async checkLogin(u,p){if(BACKEND==='supabase'){await this.loadUsers();return await DB.login(u,p)}await this.loadUsers();return S.usuarios.find(x=>x.usuario.toLowerCase()===u&&x.password===p)},
+};
+/* --- Backend 2: DEMO (todo en localStorage del navegador; no toca datos reales) --- */
+const DEMO={
+  key:'demo_db_v1',
+  db(){try{var d=JSON.parse(localStorage.getItem(this.key));if(d)return d}catch(e){}var n=this.seed();this.save(n);return n},
+  save(d){try{localStorage.setItem(this.key,JSON.stringify(d))}catch(e){}},
+  seed(){var h=today(),dn=dayName(),d={};
+    d['\u{1F464} Usuarios']=[['U0001','admin','admin123','Administrador','admin'],['U0002','demo','demo123','Usuario Demo','usuario']];
+    d['\u{1F4E6} Catálogo']=[['C0001','Pasteles','Pastel de chocolate','3','pza','SI'],['C0002','Pasteles','Cheesecake','2','pza','SI'],['C0003','Panadería','Croissant','10','pza','SI'],['C0004','Bebidas','Café molido','1','kg','SI']];
+    d['\u{1F3ED} Producción']=[['P0001',h,dn,'Mañana','Pasteles','Pastel de chocolate','6','Usuario Demo',''],['P0002',h,dn,'Mañana','Panadería','Croissant','24','Usuario Demo','']];
+    d['\u{1F4B0} Ventas']=[['V0001',h,'Pasteles','Pastel de chocolate','2','Usuario Demo','']];
+    d['\u{1F37D}️ Recetas']=[];d['⚠️ Mermas']=[];d['\u{1F4CA} Saldo Inicial']=[];d['\u{1F4DC} Bitácora']=[];d['\u{1F512} Turnos']=[];
+    return d},
+  async read(sh,rg){var r=_rg(rg);return(this.db()[sh]||[]).slice(r.start-2,r.end-1).map(function(x){return x.slice()})},
+  async append(sh,v){var d=this.db();(d[sh]=d[sh]||[]).push(v.map(function(x){return x==null?'':String(x)}));this.save(d);return{success:true}},
+  async deleteRow(sh,row){var d=this.db();if(!d[sh]||row<2||row-2>=d[sh].length)throw new Error('Fila no encontrada');d[sh].splice(row-2,1);this.save(d);return{success:true}},
+  reset(){try{localStorage.removeItem(this.key)}catch(e){}}
+};
+/* --- Backend 3: SUPABASE (PostgREST por fetch, sin librerias; misma forma de filas que Sheets) --- */
+const SBK={
+  rowIds:{},
+  async req(path,opt){opt=opt||{};var h=Object.assign({apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json'},opt.headers||{});var r=await fetch(SB_URL+'/rest/v1/'+path,Object.assign({cache:'no-store'},opt,{headers:h}));if(!r.ok){var t='';try{t=await r.text()}catch(e){}throw new Error('Supabase '+r.status+' '+t.slice(0,200))}return r},
+  async rpc(fn,args){var r=await this.req('rpc/'+fn,{method:'POST',body:JSON.stringify(args||{})});return await r.json()},
+  async read(sh,rg){
+    if(!SB_URL||!SB_KEY)throw new Error('Falta configurar Supabase (sburl / sbkey)');
+    var def=TABLES[sh];if(!def)throw new Error('Hoja desconocida: '+sh);
+    if(def.t==='usuarios'){var us=await this.rpc('app_list_users');return us.map(function(u){return[u.id||'',u.usuario||'','',u.nombre||'',u.rol||'usuario']})}
+    var r=_rg(rg),off=r.start-2,total=r.end-r.start+1,out=[],ids=[],PAGE=1000;
+    var sel='seq,'+def.c.map(function(c){return c.n}).join(',');
+    while(out.length<total){var n=Math.min(PAGE,total-out.length);
+      var res=await this.req(def.t+'?select='+sel+'&order=seq.asc&limit='+n+'&offset='+(off+out.length));var rows=await res.json();
+      rows.forEach(function(x){ids.push(x.seq);out.push(def.c.map(function(c){return _fromDB(c.k,x[c.n])}))});
+      if(rows.length<n)break}
+    if(off===0)this.rowIds[def.t]={};var m=this.rowIds[def.t]=this.rowIds[def.t]||{};ids.forEach(function(id,i){m[2+off+i]=id});
+    return out},
+  async append(sh,v){var def=TABLES[sh];if(!def||def.t==='usuarios')throw new Error('Escritura no permitida en '+sh);var b={};def.c.forEach(function(c,i){b[c.n]=_toDB(c.k,v[i])});await this.req(def.t,{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(b)});return{success:true}},
+  async deleteRow(sh,row){var def=TABLES[sh];var id=def&&(this.rowIds[def.t]||{})[row];if(!id)throw new Error('Fila '+row+' no encontrada; recarga los datos');var res=await this.req(def.t+'?seq=eq.'+id,{method:'DELETE',headers:{Prefer:'return=representation'}});var d=await res.json();if(!d.length)throw new Error('No se pudo borrar (permisos o fila ya borrada)');return{success:true}},
+  async login(u,p){var r=await this.rpc('app_login',{p_usuario:u,p_password:p});return r&&r[0]?{id:r[0].id,usuario:r[0].usuario,nombre:r[0].nombre,rol:(r[0].rol||'usuario').toLowerCase()}:null}
+};
+const DB=BACKEND==='supabase'?SBK:BACKEND==='demo'?DEMO:GS;
+/* Aviso visible cuando NO se usa Google Sheets (evita confundir datos de prueba con reales) */
+(function(){if(BACKEND==='sheets')return;var b=document.createElement('div');b.style.cssText='position:fixed;left:8px;bottom:8px;z-index:9999;font:600 11px system-ui;padding:4px 10px;border-radius:12px;background:'+(BACKEND==='demo'?'#fbbf24':'#3b82f6')+';color:#000;opacity:.9;pointer-events:none';b.textContent=BACKEND==='demo'?'\u{1F9EA} MODO DEMO · datos locales':'☁️ SUPABASE (pruebas)';document.body.appendChild(b)})();
 const Sheets={
-  async read(sh,rg){const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${S.sheetId}/values/${encodeURIComponent(sh)}!${rg}?key=${S.apiKey}`,{cache:'no-store'});if(!r.ok)throw new Error(r.status);const d=await r.json();return d.values||[]},
-  async append(sh,v){try{const r=await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({sheet:sh,values:v})});const d=await r.json();if(!d.success)throw new Error(d.error);return d}catch(e){_qAdd(sh,v);throw e}},
-  async deleteRow(sh,row){const r=await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'delete',sheet:sh,row:row})});const d=await r.json();if(!d.success)throw new Error(d.error);return d},
+  async read(sh,rg){return DB.read(sh,rg)},
+  async append(sh,v){try{return await DB.append(sh,v)}catch(e){_qAdd(sh,v);throw e}},
+  async deleteRow(sh,row){return DB.deleteRow(sh,row)},
+  async checkLogin(u,p){if(BACKEND==='supabase'){await this.loadUsers();return await DB.login(u,p)}await this.loadUsers();return S.usuarios.find(x=>x.usuario.toLowerCase()===u&&x.password===p)},
   async loadUsers(){try{const rows=await this.read('\u{1F464} Usuarios','A2:E50');S.usuarios=rows.map(r=>({id:r[0]||'',usuario:r[1]||'',password:r[2]||'',nombre:r[3]||'',rol:(r[4]||'usuario').toLowerCase()})).filter(u=>u.usuario);return true}catch(e){console.error(e);return false}},
   async loadAll(){S.loading=true;render();try{
     const c=await this.read('\u{1F4E6} Cat\u00e1logo','A2:F100');S.catalogo=c.map(r=>({id:r[0]||'',categoria:r[1]||'',producto:r[2]||'',stockMinimo:parseInt(r[3])||0,unidad:r[4]||'',activo:(r[5]||'SI').toString().trim().toUpperCase()})).filter(p=>p.producto&&p.activo!=='NO');
@@ -255,7 +327,7 @@ function _qGet(){try{return JSON.parse(localStorage.getItem('_pendingQ')||'[]')}
 function _qSave(q){try{localStorage.setItem('_pendingQ',JSON.stringify(q))}catch(e){}}
 function _qAdd(sh,v){var q=_qGet();q.push({sh:sh,v:v,ts:Date.now()});_qSave(q);console.warn('\u26a0\ufe0f Guardado local por falta de conexi\u00f3n:',sh)}
 function _qCount(){return _qGet().length}
-async function retryQueue(){var q=_qGet();if(!q.length){toast('Sin datos pendientes');return}showWorking();var ok=0;var fail=[];for(var i=0;i<q.length;i++){try{var _r=await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({sheet:q[i].sh,values:q[i].v})});var _d=await _r.json();if(!_d.success)throw new Error(_d.error);ok++}catch(e){fail.push(q[i])}}  _qSave(fail);hideWorking();if(fail.length===0){toast('\u2705 '+ok+' registro'+(ok!==1?'s':'')+' sincronizado'+(ok!==1?'s':''));await Sheets.loadAll()}
+async function retryQueue(){var q=_qGet();if(!q.length){toast('Sin datos pendientes');return}showWorking();var ok=0;var fail=[];for(var i=0;i<q.length;i++){try{await DB.append(q[i].sh,q[i].v);ok++}catch(e){fail.push(q[i])}}  _qSave(fail);hideWorking();if(fail.length===0){toast('\u2705 '+ok+' registro'+(ok!==1?'s':'')+' sincronizado'+(ok!==1?'s':''));await Sheets.loadAll()}
 else{toast('\u26a0\ufe0f '+ok+' sincronizados, '+fail.length+' fallaron \u2014 revisa conexi\u00f3n',1)}}
 function discardQueue(){if(!confirm('\u00bfDescartar '+_qCount()+' registros pendientes?\n\nEsto eliminar\u00e1 los datos no sincronizados de forma permanente.'))return;localStorage.removeItem('_pendingQ');render();toast('Cola limpiada')}
 function _qBanner(){var n=_qCount();if(!n)return'';return'<div style="background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.5);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px"><div style="font-size:20px">\u26a0\ufe0f</div><div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--yellow)">'+n+' registro'+(n!==1?'s':'')+' sin sincronizar</div><div style="font-size:11px;color:var(--text2)">Guardados localmente por falta de conexi\u00f3n</div></div><button class="btn btn-sm" onclick="retryQueue()" style="background:rgba(251,191,36,.2);border:1px solid rgba(251,191,36,.5);color:var(--yellow);padding:6px 10px;font-size:12px;margin-right:6px">\u{1F504} Reintentar</button><button onclick="discardQueue()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:2px 6px">\u00d7</button></div>'}
@@ -285,7 +357,7 @@ async function connectSheet(){if(!S.sheetId||!S.apiKey)return;toast('Conectando.
 
 function renderLogin(){return`<div class="setup-screen"><img src="${LOGO}" class="setup-logo" onerror="this.style.display='none'"><div class="setup-title">Iniciar Sesi\u00f3n</div><div class="setup-desc">Ingresa tus credenciales</div><input class="login-input" id="lu" placeholder="\u{1F464} Usuario" autocapitalize="off" autocomplete="off"><input class="login-input" id="lp" placeholder="\u{1F512} Contrase\u00f1a" type="password" onkeydown="if(event.key==='Enter')doLogin()"><div style="width:100%;max-width:360px"><button class="btn btn-primary" onclick="doLogin()">\u{1F511} Entrar</button></div><div style="margin-top:20px;font-size:11px;color:var(--text2)">Solicita tus credenciales al administrador</div></div>`}
 
-async function doLogin(){const u=document.getElementById('lu').value.trim().toLowerCase(),p=document.getElementById('lp').value;if(!u||!p){toast('Escribe usuario y contrase\u00f1a',1);hideWorking();return}await Sheets.loadUsers();const f=S.usuarios.find(x=>x.usuario.toLowerCase()===u&&x.password===p);if(!f){toast('Usuario o contrase\u00f1a incorrectos',1);hideWorking();return}S.currentUser={id:f.id,usuario:f.usuario,nombre:f.nombre,rol:f.rol};localStorage.setItem('currentUser',JSON.stringify(S.currentUser));S.screen='main';toast('\u00a1Bienvenido, '+f.nombre+'!');await Sheets.loadAll()}
+async function doLogin(){const u=document.getElementById('lu').value.trim().toLowerCase(),p=document.getElementById('lp').value;if(!u||!p){toast('Escribe usuario y contrase\u00f1a',1);hideWorking();return}const f=await Sheets.checkLogin(u,p);if(!f){toast('Usuario o contrase\u00f1a incorrectos',1);hideWorking();return}S.currentUser={id:f.id,usuario:f.usuario,nombre:f.nombre,rol:f.rol};localStorage.setItem('currentUser',JSON.stringify(S.currentUser));S.screen='main';toast('\u00a1Bienvenido, '+f.nombre+'!');await Sheets.loadAll()}
 
 function logout(){S.currentUser=null;S._realAdmin=null;localStorage.removeItem('currentUser');localStorage.removeItem('_realAdmin');S.screen='login';modalType=null;render();toast('Sesi\u00f3n cerrada')}
 async function quickSwitch(usuario){showWorking();var u=S.usuarios.find(function(x){return x.usuario===usuario});if(!u){toast('Usuario no encontrado',1);hideWorking();return}if(isAdmin()&&!S._realAdmin){S._realAdmin=JSON.parse(JSON.stringify(S.currentUser));localStorage.setItem('_realAdmin',JSON.stringify(S._realAdmin))}S.currentUser={id:u.id,usuario:u.usuario,nombre:u.nombre,rol:u.rol};localStorage.setItem('currentUser',JSON.stringify(S.currentUser));S.screen='main';modalType=null;toast('\u{1F504} Cambiado a '+u.nombre+' ('+u.rol+')');await Sheets.loadAll()}
@@ -486,9 +558,9 @@ async function submitCartVenta(){if(_submitting)return;_submitting=true;showWork
 async function subNewProd(){showWorking();if(!isAdmin()){toast('Sin permisos',1);hideWorking();return}let cat=document.getElementById('fNPC').value;const nc=document.getElementById('fNCN')?.value?.trim()||'';const nm=document.getElementById('fNPN').value.trim();const mn=document.getElementById('fNPM').value||'0';const un=document.getElementById('fNPU').value;if(cat==='__new__'){if(!nc){toast('Escribe la categor\u00eda',1);hideWorking();return}cat=nc}if(!cat||!nm){toast('Completa categor\u00eda y nombre',1);hideWorking();return}if(isDup(nm,cat)){toast('Producto ya existe',1);hideWorking();return}const id=nextId('PROD',S.catalogo);try{await Sheets.append('\u{1F4E6} Cat\u00e1logo',[id,cat,nm,parseInt(mn),un,'SI']);await logAction('Producto agregado',nm+' en '+cat,'add');toast(nm+' agregado');document.getElementById('fNPN').value='';document.getElementById('fNPM').value='';document.getElementById('dupW').innerHTML='';await Sheets.loadAll();const cs=document.getElementById('fNPC');if(cs){const cats=getCats();cs.innerHTML='<option value="">Seleccionar...</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('')+'<option value="__new__">\uff0b Nueva categor\u00eda...</option>';cs.value=cat}}catch(e){toast('Error al guardar',1)}}
 
 function saveSett(){S.sheetId=document.getElementById('sS').value;S.apiKey=document.getElementById('sA').value;var wn=document.getElementById('sWN');if(wn)S.waNumber=wn.value.replace(/\D/g,'');var wr=document.getElementById('sWR');if(wr)S.waReminder=wr.value;localStorage.setItem('sheetId',S.sheetId);localStorage.setItem('apiKey',S.apiKey);localStorage.setItem('waNumber',S.waNumber);localStorage.setItem('waReminder',S.waReminder);toast('Guardado');closeModal();Sheets.loadAll()}
-function resetApp(){localStorage.clear();S.sheetId='';S.apiKey='';S.screen='setup';S.setupStep=1;S.connected=false;S.currentUser=null;closeModal();render()}
+function resetApp(){var _k={};['backend','sbUrl','sbKey'].forEach(function(k){var v=localStorage.getItem(k);if(v!==null)_k[k]=v});localStorage.clear();Object.keys(_k).forEach(function(k){localStorage.setItem(k,_k[k])});S.sheetId='';S.apiKey='';S.screen='setup';S.setupStep=1;S.connected=false;S.currentUser=null;closeModal();render()}
 
-(async function(){if(S.sheetId&&S.apiKey){const su=localStorage.getItem('currentUser');if(su){try{S.currentUser=JSON.parse(su);var _ra=localStorage.getItem('_realAdmin');if(_ra)try{S._realAdmin=JSON.parse(_ra)}catch(e){};S.screen='main';S.connected=true;render();await Sheets.loadUsers();const ok=S.usuarios.find(u=>u.usuario===S.currentUser.usuario);if(!ok){toast('Cuenta deshabilitada',1);logout();return}await Sheets.loadAll();if(_qCount()>0){setTimeout(function(){toast('\u26a0\ufe0f '+_qCount()+' registro'+(+_qCount()!==1?'s':'')+' pendiente'+(+_qCount()!==1?'s':'')+' de sincronizar \u2014 ve al Inicio',1)},500)}}catch(e){S.screen='login';render()}}else{S.screen='login';S.connected=true;await Sheets.loadUsers();render()}}else{render()}})();
+(async function(){if(BACKEND==='supabase'&&(!SB_URL||!SB_KEY))toast('Falta configurar Supabase (sburl y sbkey)',1);if(BACKEND!=='sheets'||(S.sheetId&&S.apiKey)){const su=localStorage.getItem('currentUser');if(su){try{S.currentUser=JSON.parse(su);var _ra=localStorage.getItem('_realAdmin');if(_ra)try{S._realAdmin=JSON.parse(_ra)}catch(e){};S.screen='main';S.connected=true;render();await Sheets.loadUsers();const ok=S.usuarios.find(u=>u.usuario===S.currentUser.usuario);if(!ok){toast('Cuenta deshabilitada',1);logout();return}await Sheets.loadAll();if(_qCount()>0){setTimeout(function(){toast('\u26a0\ufe0f '+_qCount()+' registro'+(+_qCount()!==1?'s':'')+' pendiente'+(+_qCount()!==1?'s':'')+' de sincronizar \u2014 ve al Inicio',1)},500)}}catch(e){S.screen='login';render()}}else{S.screen='login';S.connected=true;await Sheets.loadUsers();render()}}else{render()}})();
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(function(e){console.log('SW:',e)})}
 </script>
