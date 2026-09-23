@@ -162,7 +162,8 @@ create index if not exists turnos_fecha_idx     on produccion_app.turnos (fecha)
 --   * `usuarios` NO es legible por anon (las contraseñas ya no viajan
 --     al navegador): el login se hace con la función app_login().
 --   * anon solo puede BORRAR en `recetas` (único borrado que hace la app).
---   * Nadie puede hacer UPDATE desde anon (la app nunca actualiza filas).
+--   * anon solo puede ACTUALIZAR `catalogo` (activar/desactivar/editar productos
+--     desde la app); ninguna otra tabla acepta UPDATE.
 -- Fase 2 recomendada: Supabase Auth y políticas por rol (ver docs).
 -- =====================================================================
 alter table produccion_app.usuarios      enable row level security;
@@ -189,6 +190,9 @@ end $$;
 drop policy if exists app_delete on produccion_app.recetas;
 create policy app_delete on produccion_app.recetas for delete to anon using (true);
 
+drop policy if exists app_update on produccion_app.catalogo;
+create policy app_update on produccion_app.catalogo for update to anon using (true) with check (true);
+
 -- Permisos (RLS filtra encima de esto). Solo objetos de produccion_app.
 grant usage on schema produccion_app to anon, service_role;
 revoke all on produccion_app.usuarios from anon, authenticated;
@@ -196,6 +200,7 @@ grant select, insert on produccion_app.catalogo, produccion_app.produccion, prod
                         produccion_app.recetas, produccion_app.mermas, produccion_app.saldo_inicial,
                         produccion_app.bitacora, produccion_app.turnos to anon;
 grant delete on produccion_app.recetas to anon;
+grant update (id, categoria, producto, stock_minimo, unidad, activo) on produccion_app.catalogo to anon;
 grant usage, select on all sequences in schema produccion_app to anon;
 -- service_role (script de migracion / panel): acceso total, solo a este esquema
 grant all on all tables    in schema produccion_app to service_role;
