@@ -22,6 +22,7 @@ const server = http.createServer((req, res) => {
       const prof = req.headers['accept-profile'] || req.headers['content-profile'];
       if (prof !== 'produccion_app') return json(res, 406, { message: 'schema no expuesto: ' + prof }); // como PostgREST
       if (p === 'rpc/app_list_users') return json(res, 200, users.map(({ pw, ...r }) => r));
+      if (p === 'rpc/app_verify_admin') { const b = JSON.parse(body); const f = users.find(x => x.rol === 'admin' && b.p_password && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       const t = p; const rows = tbl(t);
       if (req.method === 'POST') { const r = JSON.parse(body); r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); return json(res, 201, {}); }
@@ -59,6 +60,7 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(() => S.recetas.length === 2 && S.recetas[1]._sheetRow === 3), 'demo: append recetas + _sheetRow');
   await pg.evaluate(async () => { await Sheets.deleteRow('\u{1F37D}️ Recetas', 2); await Sheets.loadAll(); });
   ok(await pg.evaluate(() => S.recetas.length === 1 && S.recetas[0].ingrediente === 'Huevo'), 'demo: deleteRow recetas');
+  ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('admin123'))?.nombre === 'Administrador' && (await Sheets.verifyAdmin('')) === null && (await Sheets.verifyAdmin('demo123')) === null && (await Sheets.verifyAdmin('x')) === null), 'demo: verifyAdmin acepta admin, rechaza vacia / usuario normal / incorrecta');
   // cola offline con backend demo: fallo forzado
   await pg.evaluate(() => { DEMO.append = async () => { throw new Error('x') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V9', today(), 'x', 'y', 1, 'z', '']) } catch (e) { } });
@@ -78,6 +80,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(() => S.screen === 'login'), 'sb: clave mala rechazada (server-side)');
   await pg.fill('#lp', 'secreto'); await pg.click('text=Entrar'); await pg.waitForTimeout(800);
   ok(await pg.evaluate(() => S.screen === 'main' && S.currentUser.usuario === 'admin'), 'sb: login OK via app_login');
+  ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('secreto'))?.nombre === 'Admin' && (await Sheets.verifyAdmin('')) === null && (await Sheets.verifyAdmin('mala')) === null), 'sb: verifyAdmin va al servidor (app_verify_admin); vacia y mala rechazadas');
+  ok(await pg.evaluate(() => S.usuarios.every(u => u.password === '')), 'sb: ninguna contraseña en el navegador (S.usuarios)');
   // escrituras que hace la app: formatos de fecha/num/bool
   await pg.evaluate(async () => {
     await Sheets.append('\u{1F4E6} Catálogo', ['C1', 'Pasteles', 'Cheesecake', '2', 'pza', 'SI']);
@@ -129,6 +133,39 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   const names = [...html.matchAll(/Sheets\.(?:read|append|deleteRow)\(('[^']+')/g)].map(m => m[1]);
   const missing = await pg.evaluate(ns => ns.map(n => eval(n)).filter(n => !TABLES[n]), [...new Set(names)]);
   ok(missing.length === 0, 'sheets: todas las hojas referenciadas (' + new Set(names).size + ') estan en TABLES ' + JSON.stringify(missing));
+
+  // ===== 3b) SHEETS con Google interceptado (comportamiento actual de produccion) =====
+  ctx = await b.newContext(); pg = await ctx.newPage(); pg.on('pageerror', e => errs.push('gs2: ' + e.message));
+  const gsData = {
+    '\u{1F464} Usuarios': [['U1', 'admin', 'pw-admin', 'Gustavo', 'admin'], ['U2', 'coc', 'pw-coc', 'Fatima', 'cocina']],
+    '\u{1F4E6} Catálogo': [['C1', 'Pasteles', 'Flan', '3', 'pza', 'Sí'], ['C2', 'Pasteles', 'Viejo', '0', 'pza', 'NO']],
+    '\u{1F3ED} Producción': [['P1', '23/09/2026', 'miércoles', 'Mañana', 'Pasteles', 'Flan', '5', 'Fatima', '']],
+    '\u{1F4B0} Ventas': [],
+  };
+  const posts = [];
+  await pg.route('https://sheets.googleapis.com/**', route => {
+    const m = /values\/([^!]+)!([A-Z]+\d+:[A-Z]+\d+)/.exec(decodeURIComponent(route.request().url()));
+    const vals = gsData[m && m[1]];
+    if (!vals) return route.fulfill({ status: 400, body: '{}' });
+    route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ values: vals }) });
+  });
+  await pg.route('https://script.google.com/**', route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
+    posts.push(JSON.parse(route.request().postData()));
+    route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ success: !globalThis.__gsFail }) });
+  });
+  await pg.addInitScript(() => { localStorage.setItem('sheetId', 'SID'); localStorage.setItem('apiKey', 'KEY'); });
+  await pg.goto('http://localhost:8765/'); await pg.waitForSelector('#lu');
+  ok(await pg.evaluate(() => BACKEND === 'sheets' && DB === GS), 'gs: backend por defecto = Google Sheets');
+  ok(await pg.evaluate(() => S.usuarios.length === 2 && S.usuarios[1].rol === 'cocina' && S.usuarios[0].password === 'pw-admin'), 'gs: lee usuarios de la hoja (sin recursion)');
+  ok(await pg.evaluate(async () => { await Sheets.loadAll(); return S.catalogo.length === 1 && S.catalogo[0].producto === 'Flan' && S.produccion[0].cantidad === 5 && S.inventario[0].stockActual === 5 }), 'gs: loadAll calcula catalogo e inventario');
+  ok(await pg.evaluate(async () => { await Sheets.append('\u{1F4B0} Ventas', ['V1', '23/09/2026', 'x', 'Flan', 1, 'u', '']); await Sheets.deleteRow('\u{1F37D}️ Recetas', 7); return true }) && posts.length === 2 && posts[0].sheet === '\u{1F4B0} Ventas' && posts[0].values[3] === 'Flan' && posts[1].action === 'delete' && posts[1].row === 7, 'gs: append y deleteRow salen al Apps Script con el mismo formato de siempre');
+  ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('pw-admin'))?.nombre === 'Gustavo' && (await Sheets.verifyAdmin('pw-coc')) === null && (await Sheets.verifyAdmin('')) === null), 'gs: verifyAdmin compara con la hoja; rol cocina no sirve; vacia rechazada');
+  ok(await pg.evaluate(async () => (await Sheets.checkLogin('coc', 'pw-coc'))?.rol === 'cocina' && (await Sheets.checkLogin('coc', 'mala')) === undefined), 'gs: login conserva el rol cocina');
+  await pg.evaluate(() => { GS.append = async () => { throw new Error('sin red') }; });
+  await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V2', '23/09/2026', 'x', 'Flan', 1, 'u', '']) } catch (e) { } });
+  ok(await pg.evaluate(() => _qCount() === 1), 'gs: sin red => cola local (comportamiento actual)');
+  await ctx.close();
   ok(errs.length === 0, 'sin errores JS de pagina ' + JSON.stringify(errs));
   await b.close(); server.close();
   console.log(fails ? '\n' + fails + ' FALLAS' : '\nTODO OK');
