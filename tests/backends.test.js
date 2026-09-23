@@ -60,6 +60,25 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(() => S.screen === 'login'), 'demo: login con clave mala rechazado');
   await pg.fill('#lp', 'admin123'); await pg.click('text=Entrar'); await pg.waitForTimeout(800);
   ok(await pg.evaluate(() => S.screen === 'main' && S.currentUser.rol === 'admin'), 'demo: login admin OK');
+  // ---- dock de navegacion (rediseño) ----
+  ok(await pg.evaluate(() => document.querySelectorAll('.dock-item').length === 7 && !document.querySelector('.bottom-nav') && document.querySelector('.dock-item.active .di-lb').textContent.trim() === 'Inicio'), 'dock: 7 secciones, sin barra inferior antigua, Inicio activo');
+  ok(await pg.evaluate(() => document.querySelector('.dock-item.wide .di-lb').textContent.trim() === 'Bitácora'), 'dock: con 7 secciones la ultima ocupa las 2 columnas');
+  ok(await pg.evaluate(() => getComputedStyle(document.querySelector('.dock-grid')).gridTemplateColumns.split(' ').length === 2), 'dock: rejilla de 2 columnas');
+  ok(await pg.evaluate(() => getComputedStyle(document.querySelector('.dock-panel')).visibility === 'hidden' && S.dockOpen !== true), 'dock: plegado al inicio (solo se ve el boton)');
+  await pg.click('.dock-btn'); await pg.waitForTimeout(800);
+  ok(await pg.evaluate(() => S.dockOpen === true && document.querySelector('.dock-btn').getAttribute('aria-expanded') === 'true' && getComputedStyle(document.querySelector('.dock-panel')).opacity === '1' && document.querySelector('.dock').classList.contains('open')), 'dock: al tocar el boton se despliega');
+  await pg.keyboard.press('Escape'); await pg.waitForTimeout(700);
+  ok(await pg.evaluate(() => S.dockOpen === false && getComputedStyle(document.querySelector('.dock-panel')).visibility === 'hidden'), 'dock: Escape lo pliega');
+  await pg.click('.dock-btn'); await pg.waitForTimeout(700); await pg.mouse.click(195, 60); await pg.waitForTimeout(600);
+  ok(await pg.evaluate(() => S.dockOpen === false), 'dock: tocar fuera (fondo) lo pliega');
+  await pg.click('.dock-btn'); await pg.waitForTimeout(700);
+  await pg.click('.dock-item:nth-child(2)'); await pg.waitForTimeout(600);
+  ok(await pg.evaluate(() => S.tab === 'produccion' && S.dockOpen === false && document.querySelector('.dock-item.active .di-lb').textContent.trim() === 'Producción'), 'dock: elegir una seccion navega, se pliega y marca la activa');
+  await pg.click('.dock-btn'); await pg.waitForTimeout(600); await pg.click('.dock-item:nth-child(1)'); await pg.waitForTimeout(600);
+  ok(await pg.evaluate(() => S.tab === 'home' && document.querySelectorAll('.quick-btn').length === 6), 'dock: vuelve a Inicio');
+  ok(await pg.evaluate(() => { const c = [...document.querySelectorAll('.quick-btn')].map(b => getComputedStyle(b).getPropertyValue('--c').trim()); return new Set(c).size === 6 && c.every(Boolean) }), 'neon: cada acceso rapido tiene su propio color');
+  ok(await pg.evaluate(() => [...document.querySelectorAll('.quick-btn')].every(b => getComputedStyle(b).boxShadow !== 'none')), 'neon: los accesos rapidos tienen resplandor');
+  ok(await pg.evaluate(() => { const m = document.getElementById('mc').getBoundingClientRect(); const d = document.querySelector('.dock-btn').getBoundingClientRect(); return m.bottom > d.top && parseFloat(getComputedStyle(document.getElementById('mc')).paddingBottom) >= 100 }), 'dock: el contenido deja espacio para que el boton no tape lo ultimo');
   const st = await pg.evaluate(() => ({ c: S.catalogo.length, p: S.produccion.length, v: S.ventas.length, inv: S.inventario.map(i => i.producto + '=' + i.stockActual).join(',') }));
   console.log('   demo estado', JSON.stringify(st));
   ok(st.c === 4 && st.p === 2 && st.v === 1, 'demo: loadAll carga catalogo/produccion/ventas');
