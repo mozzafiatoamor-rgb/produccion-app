@@ -60,6 +60,7 @@ idéntico antes y después). Protecciones:
 1. **Diagnóstico**: pegar `supabase/00_diagnostico.sql` en *SQL Editor* y revisar el resultado (¿existe ya el esquema? ¿dónde está pgcrypto? ¿qué esquemas expone la API?).
 2. **Respaldo** del proyecto compartido antes de instalar (Database → Backups, o `pg_dump`). En plan Free no hay respaldos automáticos.
 3. Pegar `supabase/schema.sql` en *SQL Editor* → Run. Agregar `produccion_app` a *Exposed schemas*.
+3b. **Verificar la conexión** (solo lectura, con la llave pública): en `migration/.env` poner `SUPABASE_URL` y `SUPABASE_ANON_KEY`, y correr `node migration/check.mjs`. Todo debe salir ✓ antes de seguir.
 4. `cp migration/.env.example migration/.env` y llenar `GOOGLE_SHEET_ID`, `GOOGLE_API_KEY`
    (los mismos que usa la app; solo lectura), `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`
    (*Settings → API*; solo en tu computadora, **nunca** en `index.html`).
