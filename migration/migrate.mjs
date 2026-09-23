@@ -53,7 +53,7 @@ const sbHeaders = () => {
   if (/^eyJ/.test(k)) h.Authorization = 'Bearer ' + k;   // llaves nuevas (sb_secret_...) no son JWT
   return h;
 };
-const sbUrl = p => process.env.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/' + p;
+const sbUrl = p => process.env.SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '') + '/rest/v1/' + p;   // acepta la URL con o sin /rest/v1/
 async function sb(p, opt = {}) {
   const r = await fetch(sbUrl(p), { ...opt, headers: { ...sbHeaders(), ...(opt.headers || {}) } });
   if (!r.ok) throw new Error(`${opt.method || 'GET'} ${p} -> ${r.status} ${(await r.text()).slice(0, 300)}`);
