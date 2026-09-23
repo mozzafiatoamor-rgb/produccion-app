@@ -46,7 +46,13 @@ async function exportSheets() {
 }
 
 // ---------------- utilidades Supabase ----------------
-const sbHeaders = () => ({ apikey: process.env.SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + process.env.SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json' });
+const SCHEMA = process.env.SUPABASE_SCHEMA || 'produccion_app';   // esquema propio (no public)
+const sbHeaders = () => {
+  const k = process.env.SUPABASE_SERVICE_KEY;
+  const h = { apikey: k, 'Content-Type': 'application/json', 'Accept-Profile': SCHEMA, 'Content-Profile': SCHEMA };
+  if (/^eyJ/.test(k)) h.Authorization = 'Bearer ' + k;   // llaves nuevas (sb_secret_...) no son JWT
+  return h;
+};
 const sbUrl = p => process.env.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/' + p;
 async function sb(p, opt = {}) {
   const r = await fetch(sbUrl(p), { ...opt, headers: { ...sbHeaders(), ...(opt.headers || {}) } });

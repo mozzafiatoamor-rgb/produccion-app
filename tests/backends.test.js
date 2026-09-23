@@ -9,7 +9,7 @@ const ROOT = path.join(__dirname, '..');
 const DBM = {}; const seqs = {};
 function tbl(t) { return DBM[t] = DBM[t] || []; }
 const users = [{ id: 'U1', usuario: 'admin', nombre: 'Admin', rol: 'admin', pw: 'secreto' }];
-const log = [];
+const log = []; let sawAuth = false;
 function json(res, code, body) { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' }); res.end(JSON.stringify(body)); }
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
@@ -17,7 +17,10 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/rest/v1/')) {
     let body = ''; req.on('data', d => body += d); req.on('end', () => {
       const p = u.pathname.slice(9); log.push(req.method + ' ' + p + u.search + (body ? ' ' + body.slice(0, 120) : ''));
-      if (!req.headers.apikey || req.headers.authorization !== 'Bearer ANONKEY') return json(res, 401, { message: 'no key' });
+      if (req.headers.apikey !== 'ANONKEY') return json(res, 401, { message: 'no key' });
+      if (req.headers.authorization) sawAuth = true;                      // una llave no-JWT no debe mandar Authorization
+      const prof = req.headers['accept-profile'] || req.headers['content-profile'];
+      if (prof !== 'produccion_app') return json(res, 406, { message: 'schema no expuesto: ' + prof }); // como PostgREST
       if (p === 'rpc/app_list_users') return json(res, 200, users.map(({ pw, ...r }) => r));
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       const t = p; const rows = tbl(t);
@@ -112,6 +115,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   for (let i = 0; i < 2500; i++) tbl('mermas').push({ seq: (seqs.mermas = (seqs.mermas || 0) + 1), id: 'M' + i, fecha: '2026-09-01', hora: '', categoria: 'c', producto: 'Cheesecake', cantidad: 1, motivo: '', responsable: '' });
   const nm = await pg.evaluate(async () => (await Sheets.read('⚠️ Mermas', 'A2:H50000')).length);
   ok(nm === 2500, 'sb: paginacion lee 2500 filas (' + nm + ')');
+  ok(!sawAuth, 'sb: llave no-JWT (sb_publishable_) se manda solo en apikey, sin Authorization');
+  ok(log.length > 0, 'sb: ' + log.length + ' peticiones, todas con Accept/Content-Profile: produccion_app (el mock responde 406 si falta)');
   await ctx.close();
 
   // ===== 3) SHEETS (default) no cambia =====
