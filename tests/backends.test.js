@@ -10,7 +10,8 @@ const DBM = {}; const seqs = {};
 function tbl(t) { return DBM[t] = DBM[t] || []; }
 const users = [{ id: 'U1', usuario: 'admin', nombre: 'Admin', rol: 'admin', pw: 'secreto' }];
 const log = []; let sawAuth = false;
-function json(res, code, body) { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' }); res.end(JSON.stringify(body)); }
+let slowMs = 0, noRange = false;
+function json(res, code, body, extra) { res.writeHead(code, Object.assign({ 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*', 'access-control-expose-headers': 'Content-Range' }, extra || {})); res.end(JSON.stringify(body)); }
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   if (req.method === 'OPTIONS') return json(res, 200, {});
@@ -26,7 +27,13 @@ const server = http.createServer((req, res) => {
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       const t = p; const rows = tbl(t);
       if (req.method === 'POST') { const r = JSON.parse(body); r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); return json(res, 201, {}); }
-      if (req.method === 'GET') { const off = +u.searchParams.get('offset') || 0, lim = Math.min(+u.searchParams.get('limit') || 1000, 1000); return json(res, 200, rows.slice(off, off + lim)); }
+      if (req.method === 'GET') {
+        const off = +u.searchParams.get('offset') || 0, lim = Math.min(+u.searchParams.get('limit') || 1000, 1000), gt = u.searchParams.get('seq');
+        let src = rows; if (gt && gt.startsWith('gt.')) src = rows.filter(r => r.seq > +gt.slice(3));
+        const sl = src.slice(off, off + lim), hdr = {};
+        if (!noRange && /count=exact/.test(req.headers.prefer || '')) hdr['content-range'] = (sl.length ? off + '-' + (off + sl.length - 1) : '*') + '/' + src.length;
+        return setTimeout(() => json(res, hdr['content-range'] ? 206 : 200, sl, hdr), slowMs);
+      }
       if (req.method === 'PATCH') { const id = +u.searchParams.get('seq').replace('eq.', ''); const r = rows.find(x => x.seq === id); if (!r) return json(res, 200, []); const b = JSON.parse(body); if (Object.keys(b).some(k => !['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'].includes(k))) return json(res, 403, { message: 'columna no permitida' }); Object.assign(r, b); return json(res, 200, [r]); }
       if (req.method === 'DELETE') { const id = +u.searchParams.get('seq').replace('eq.', ''); const i = rows.findIndex(r => r.seq === id); if (i < 0) return json(res, 200, []); const [d] = rows.splice(i, 1); return json(res, 200, [d]); }
       json(res, 404, {});
@@ -168,6 +175,51 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   for (let i = 0; i < 2500; i++) tbl('mermas').push({ seq: (seqs.mermas = (seqs.mermas || 0) + 1), id: 'M' + i, fecha: '2026-09-01', hora: '', categoria: 'c', producto: 'Cheesecake', cantidad: 1, motivo: '', responsable: '' });
   const nm = await pg.evaluate(async () => (await Sheets.read('⚠️ Mermas', 'A2:H50000')).length);
   ok(nm === 2500, 'sb: paginacion lee 2500 filas (' + nm + ')');
+  // ---- carga rapida: paginas en paralelo + recarga incremental ----
+  for (let i = 0; i < 5200; i++) tbl('ventas').push({ seq: (seqs.ventas = (seqs.ventas || 0) + 1), id: 'X' + i, fecha: '2026-09-02', categoria: 'TPV', producto: 'Cheesecake', cantidad: 1, vendedor: 'A', notas: '' });
+  const snap = () => pg.evaluate(() => JSON.stringify([S.produccion, S.ventas, S.mermas, S.inventario, S.stockBajo, S.recetas, S.catalogo]));
+  const gets = (from, re) => log.slice(from).filter(l => l.startsWith('GET') && re.test(l));
+  slowMs = 120; let mark = log.length; const t0 = Date.now();
+  await pg.evaluate(async () => { await Sheets.loadAll(true) }); const tFull = Date.now() - t0; slowMs = 0;
+  const ventasReq = gets(mark, /^GET ventas/);
+  ok(ventasReq.length === 6 && ventasReq.slice(0, 5).every(l => /limit=1000/.test(l)), 'perf: carga completa lee ventas (5200+ filas) en 6 paginas (' + ventasReq.length + ')');
+  const serial = log.slice(mark).filter(l => l.startsWith('GET')).length * 120;
+  ok(tFull < serial * 0.6, 'perf: las paginas y las 8 tablas se piden a la vez (' + tFull + ' ms con 120 ms por peticion; en serie serian ~' + serial + ' ms; el navegador de prueba limita a 6 conexiones, Supabase usa HTTP/2)');
+  const full1 = await snap();
+  ok(await pg.evaluate(() => S.ventas.length) >= 5200, 'perf: la app tiene todas las filas de ventas');
+  // recarga tras guardar = solo filas nuevas
+  await pg.evaluate(async () => { await Sheets.append('\u{1F4B0} Ventas', ['VN1', '23/09/2026', 'TPV', 'Cheesecake', 2, 'Admin', '']); await Sheets.append('\u{1F3ED} Producción', ['PN1', '23/09/2026', 'x', 'Mañana', 'Pasteles', 'Cheesecake', 4, 'Admin', '']); });
+  mark = log.length; slowMs = 120; const t1 = Date.now();
+  await pg.evaluate(async () => { await Sheets.loadAll() }); const tInc = Date.now() - t1; slowMs = 0;
+  const g1 = gets(mark, /./);
+  const heavy = g1.filter(l => /^GET (ventas|produccion|mermas)/.test(l));
+  ok(heavy.length === 3 && heavy.every(l => /seq=gt\./.test(l) && !/offset=/.test(l)), 'perf: tras guardar solo pide las filas nuevas de produccion/ventas/mermas (' + heavy.map(l => l.split('?')[0]).join(',') + ')');
+  ok(tInc < tFull * 0.85, 'perf: recarga incremental mas rapida (' + tInc + ' ms vs ' + tFull + ' ms la completa)');
+  ok(await pg.evaluate(() => S.ventas[0].id === 'VN1' && S.ventas.length >= 5201 && S.produccion[0].id === 'PN1'), 'perf: las filas nuevas aparecen (ventas y produccion)');
+  const inc1 = await snap();
+  await pg.evaluate(async () => { await Sheets.loadAll(true) });
+  ok(inc1 === await snap(), 'perf: recarga incremental == recarga completa (mismo inventario, stock bajo, listas)');
+  // today() ya no crea un formateador por llamada (con 33 mil filas la pantalla de inicio tardaba ~2 s)
+  ok(await pg.evaluate(() => today() === new Date().toLocaleDateString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit' }) && /^\d\d\/\d\d\/\d{4}$/.test(today())), 'perf: today() da el mismo texto dd/mm/yyyy de siempre');
+  const tHome = await pg.evaluate(() => { const a = performance.now(); render(); return performance.now() - a });
+  ok(tHome < 300, 'perf: dibujar la pantalla con ' + (await pg.evaluate(() => S.produccion.length + S.ventas.length + S.mermas.length)) + ' filas tarda ' + Math.round(tHome) + ' ms');
+  // otro dispositivo agrega filas: tambien llegan
+  tbl('ventas').push({ seq: (seqs.ventas = seqs.ventas + 1), id: 'OTRO1', fecha: '2026-09-23', categoria: 'TPV', producto: 'Cheesecake', cantidad: 1, vendedor: 'B', notas: '' });
+  await pg.evaluate(async () => { await Sheets.loadAll() });
+  ok(await pg.evaluate(() => S.ventas[0].id === 'OTRO1'), 'perf: filas agregadas desde otro dispositivo llegan en la recarga incremental');
+  // boton Actualizar = completa
+  mark = log.length; await pg.evaluate(async () => { await Sheets.loadAll(true) });
+  ok(gets(mark, /^GET ventas/).length === 6, 'perf: loadAll(true) (boton Actualizar) vuelve a leer todo');
+  // sin Content-Range (proxy raro): cae a paginas en serie y da lo mismo
+  noRange = true; await pg.evaluate(async () => { await Sheets.loadAll(true) }); noRange = false;
+  ok(await pg.evaluate(() => S.ventas.length) >= 5202, 'perf: sin Content-Range sigue funcionando (paginas en serie)');
+  // tras un error de carga la siguiente es completa
+  await pg.evaluate(() => { S.connected = false });
+  mark = log.length; await pg.evaluate(async () => { await Sheets.loadAll() });
+  ok(gets(mark, /^GET ventas/).length === 6 && await pg.evaluate(() => S.connected === true), 'perf: si la carga anterior fallo, la siguiente es completa');
+  // borrar receta despues de recargas incrementales sigue apuntando a la fila correcta
+  await pg.evaluate(async () => { await Sheets.append('\u{1F37D}\ufe0f Recetas', ['Otra', 'Postres', 'Azucar', 2, 'kg']); await Sheets.loadAll(); const r = S.recetas.find(x => x.ingrediente === 'Azucar'); await Sheets.deleteRow('\u{1F37D}\ufe0f Recetas', r._sheetRow); await Sheets.loadAll(); });
+  ok(await pg.evaluate(() => !S.recetas.some(x => x.ingrediente === 'Azucar') && S.recetas.some(x => x.ingrediente === 'Huevo')), 'perf: deleteRow de receta sigue correcto tras recargas incrementales');
   ok(!sawAuth, 'sb: llave no-JWT (sb_publishable_) se manda solo en apikey, sin Authorization');
   ok(log.length > 0, 'sb: ' + log.length + ' peticiones, todas con Accept/Content-Profile: produccion_app (el mock responde 406 si falta)');
   await ctx.close();
