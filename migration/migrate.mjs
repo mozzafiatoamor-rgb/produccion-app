@@ -4,6 +4,7 @@
 //   node migration/migrate.mjs export            # Sheets -> migration/out/*.json  (solo lectura)
 //   node migration/migrate.mjs import --dry-run  # valida y muestra conteos, NO escribe
 //   node migration/migrate.mjs import            # escribe en Supabase (aborta si hay datos)
+//   node migration/migrate.mjs import --replace --yes-vaciar-produccion_app   # CORTE: vacia produccion_app y reimporta
 //   node migration/migrate.mjs verify            # compara conteos y sumas Sheets vs Supabase
 //
 // Configuracion en migration/.env (ver .env.example). Nunca toca la hoja: solo la LEE.
@@ -27,6 +28,8 @@ const need = (...k) => { const miss = k.filter(x => !process.env[x]); if (miss.l
 const die = m => { console.error('✖ ' + m); process.exit(1); };
 const [cmd, ...flags] = process.argv.slice(2);
 const DRY = flags.includes('--dry-run');
+const REPLACE = flags.includes('--replace');
+const CONFIRM = flags.includes('--yes-vaciar-produccion_app');
 const colLetter = n => String.fromCharCode(64 + n);
 
 // ---------------- export ----------------
@@ -106,10 +109,20 @@ async function importData() {
   if (DRY) return console.log('\n(dry-run) No se escribio nada.');
 
   // seguridad: no mezclar con datos existentes
+  if (REPLACE) {
+    if (!CONFIRM) die('--replace BORRA todos los datos de ' + SCHEMA + ' (solo ese esquema). Repite con --yes-vaciar-produccion_app para confirmar.');
+    if (SCHEMA === 'public') die('Por seguridad este script nunca vacia el esquema public.');
+    console.log(`\n\u26a0 Vaciando el esquema ${SCHEMA} (solo las tablas de produccion-app)...`);
+    for (const { t } of plan) {
+      if (t.table === 'usuarios') continue;                    // usuarios se actualizan (upsert), no se borran
+      await sb(t.table + '?seq=gt.0', { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      console.log(`  - ${t.table}: vaciada`);
+    }
+  }
   for (const { t } of plan) {
     if (t.table === 'usuarios') continue;
     const n = await count(t.table);
-    if (n > 0) die(`La tabla ${t.table} ya tiene ${n} filas. Aborto para no duplicar. (Vacia el proyecto de pruebas y reintenta.)`);
+    if (n > 0) die(`La tabla ${t.table} ya tiene ${n} filas. Aborto para no duplicar. (Usa --replace --yes-vaciar-produccion_app en el corte.)`);
   }
   for (const { t, objs } of plan) {
     if (t.table === 'usuarios') {
