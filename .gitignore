@@ -1,0 +1,9 @@
+# Datos reales exportados de Google Sheets / secretos: NUNCA a git
+migration/out/
+migration/.env
+.env
+.env.*
+!.env.example
+!migration/.env.example
+node_modules/
+.DS_Store
