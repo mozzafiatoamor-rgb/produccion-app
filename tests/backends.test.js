@@ -26,7 +26,18 @@ const server = http.createServer((req, res) => {
       if (p === 'rpc/app_verify_admin') { const b = JSON.parse(body); const f = users.find(x => x.rol === 'admin' && b.p_password && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       const t = p; const rows = tbl(t);
-      if (req.method === 'POST') { const parsed = JSON.parse(body); const arr = Array.isArray(parsed) ? parsed : [parsed]; arr.forEach(r => { r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); }); return json(res, 201, arr); }
+      if (req.method === 'POST') {
+        const parsed = JSON.parse(body); const arr = Array.isArray(parsed) ? parsed : [parsed];
+        const conflictCol = u.searchParams.get('on_conflict'); const prefer = req.headers.prefer || '';
+        const merge = /resolution=merge-duplicates/.test(prefer), ignoreDup = /resolution=ignore-duplicates/.test(prefer);
+        const out = [];
+        arr.forEach(r => {
+          const existing = conflictCol ? rows.find(x => x[conflictCol] === r[conflictCol]) : null;
+          if (existing) { if (merge) { Object.assign(existing, r); out.push(existing); return; } if (ignoreDup) { out.push(existing); return; } }
+          r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); out.push(r);
+        });
+        return json(res, 201, out);
+      }
       if (req.method === 'GET') {
         const off = +u.searchParams.get('offset') || 0, lim = Math.min(+u.searchParams.get('limit') || 1000, 1000), gt = u.searchParams.get('seq');
         let src = rows; if (gt && gt.startsWith('gt.')) src = rows.filter(r => r.seq > +gt.slice(3));
@@ -230,6 +241,27 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(/por emparejar \(1\)/i.test(lvh) && lvh.includes('Agua mineral'), 'loy: al reactivar un ignorado vuelve a "Por emparejar" para emparejarlo con un platillo (y no queda tambien en "Emparejados")');
   ok(!/emparejados[\s\S]*Agua mineral/i.test(lvh), 'loy: un reactivado sin platillo no aparece en "Emparejados"');
+  // ---- guardar varios cambios de una sola vez (mapeo masivo, sin uno-por-uno) ----
+  tbl('loyverse_seen_items').push({ item_name: 'Pay de Queso', item_id: 'LV3', veces: 2, ultima_vez: '2026-09-24T11:30:00Z' });
+  tbl('loyverse_seen_items').push({ item_name: 'Refresco Cola', item_id: 'LV4', veces: 4, ultima_vez: '2026-09-24T11:45:00Z' });
+  await pg.evaluate(async () => { await lvLoad(); lvRefresh() }); await pg.waitForTimeout(150);
+  const postsBeforeBatch = log.filter(l => l.startsWith('POST loyverse_map')).length;
+  await pg.evaluate(() => { lvMapSelSet('Pay de Queso', 'platillo', 'Flan'); lvMapSelSet('Refresco Cola', 'ignorar', true); lvMapSelSet('Agua mineral', 'platillo', 'Flan') });
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/Guardar \(3\)/.test(lvh), 'loy/batch: elegir platillo o marcar ignorar en varios productos junta un contador de cambios, sin guardar nada todavia');
+  ok(DBM.loyverse_map.length === 2, 'loy/batch: elegir opciones en pantalla todavia no manda nada al servidor');
+  ok(await pg.evaluate(() => document.getElementById('lvSel_' + lvSlug('Refresco Cola')).disabled === true), 'loy/batch: marcar Ignorar deshabilita el selector de platillo de ese producto');
+  await pg.evaluate(async () => { await lvGuardarCambios() }); await pg.waitForTimeout(250);
+  ok(log.filter(l => l.startsWith('POST loyverse_map')).length === postsBeforeBatch + 1, 'loy/batch: "Guardar" manda un solo POST con todos los cambios juntos (no uno por uno)');
+  ok(DBM.loyverse_map.length === 4, 'loy/batch: crea filas nuevas solo para los productos que de verdad no tenian mapeo');
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'Pay de Queso' && m.platillo === 'Flan' && m.ignorado === false), 'loy/batch: emparejar un producto nuevo dentro del guardado masivo');
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'Refresco Cola' && m.ignorado === true && m.platillo === null), 'loy/batch: ignorar un producto nuevo dentro del mismo guardado');
+  ok(DBM.loyverse_map.filter(m => m.loyverse_item_name === 'Agua mineral').length === 1 && DBM.loyverse_map.find(m => m.loyverse_item_name === 'Agua mineral').platillo === 'Flan', 'loy/batch: actualiza (no duplica) la fila ya existente de un producto que se habia reactivado');
+  ok(DBM.bitacora.some(b => /Loyverse mapeo masivo/.test(JSON.stringify(b))), 'loy/batch: el guardado masivo queda como una sola entrada en la bitacora, no una por producto');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(!/Guardar \(/.test(lvh), 'loy/batch: tras guardar se limpia la seleccion pendiente (el boton desaparece)');
+  ok(lvh.includes('No hay productos de Loyverse pendientes de emparejar'), 'loy/batch: tras guardar ya no queda nada en "Por emparejar"');
+  ok(/emparejados \(3\)/i.test(lvh) && /ignorados \(1\)/i.test(lvh), 'loy/batch: los productos guardados pasan a "Emparejados" o "Ignorados" segun lo elegido');
   await pg.evaluate(() => closeModal());
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
   tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-1', fecha: '2026-09-24T12:00:00Z', resumen: '2x Flan', ventas_payload: [{ id: 'LOY-R-1-D0', fecha: '2026-09-24T12:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 2, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-1-I0', fecha: '2026-09-24T12:00:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 4, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });

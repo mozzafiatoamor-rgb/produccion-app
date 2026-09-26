@@ -20,6 +20,9 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   o lo marca **Ignorar** (por ejemplo una bebida: esta app solo lleva inventario de comida); un
   producto ignorado no vuelve a pedirse y se puede reactivar en cualquier momento. Un mapeo se
   puede pausar/reactivar.
+- **Mapeo masivo**: en "Por emparejar" ya no hay que guardar producto por producto — se elige
+  platillo (o se marca Ignorar) en varios productos a la vez y un solo botón "💾 Guardar" manda
+  todos los cambios juntos en una sola petición.
 - **Pantalla de ventas pendientes** (banner en Inicio, visible para cualquier usuario logueado):
   muestra el total agregado por platillo vendido y por ingrediente a descontar entre los recibos
   seleccionados (todos por defecto, con casilla para incluir/excluir alguno), y botones
