@@ -3,6 +3,42 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `feat/loyverse-integration`
+
+### Agregado — descuento automático de inventario desde Loyverse (solo Mozzafiato)
+- Nueva sincronización periódica (Edge Function `loyverse-sync`, se llama sola cada pocos
+  minutos vía cron de Supabase — ver `docs/LOYVERSE.md`): lee los recibos nuevos de Loyverse,
+  los cruza con **Recetas** y descuenta los ingredientes exactamente como hace hoy "Venta TPV"
+  a mano (misma tabla `ventas`, mismas reglas de redondeo hacia arriba sumando por recibo antes
+  de redondear). "Venta TPV" **no se quita**: sigue disponible como respaldo manual.
+- **Mapeo de productos** (Ajustes → 🔗 Loyverse, solo admin): como los nombres de producto en
+  Loyverse no necesariamente coinciden con los platillos de Recetas, cada producto vendido en
+  Loyverse aparece una vez en "Por emparejar" hasta que el admin elige a qué platillo corresponde;
+  después queda recordado (se puede pausar/reactivar). Mientras un producto no está emparejado,
+  su venta no descuenta nada del inventario (queda visible como pendiente, no se pierde ni se
+  inventa un descuento).
+- Reembolsos y recibos cancelados se detectan y se omiten por completo (no descuentan).
+- Un recibo nunca se aplica dos veces así se cruce un reintento con la siguiente corrida:
+  cursor por fecha + tabla `loyverse_processed_receipts` + índice único parcial en `ventas.id`
+  (solo para los ids sintéticos `LOY-*`, no afecta los ids normales).
+- `supabase/patches/003_loyverse.sql` (y `schema.sql`): tablas `loyverse_map`,
+  `loyverse_seen_items`, `loyverse_sync_state`, `loyverse_processed_receipts`, RLS y permisos
+  para `anon` (leer/administrar el mapeo desde el navegador; las otras tres solo lectura, las
+  escribe la Edge Function con la llave de servicio). **Hay que ejecutarlo en el SQL Editor antes
+  de publicar.**
+- `supabase/functions/loyverse-sync/`: `logic.mjs` (lógica pura, sin red — probada con Node) +
+  `index.ts` (Edge Function Deno: llama a la API de Loyverse, llama a `logic.mjs`, escribe en
+  Supabase). Modo `LOYVERSE_DRY_RUN=true` para probar sin escribir nada en el primer despliegue
+  (recomendado: revisar juntos el resultado antes de desactivarlo).
+- Pruebas: `tests/loyverse-sync.test.js` (27 comprobaciones de la lógica pura: mapeo, suma de
+  ingredientes compartidos antes de redondear, productos sin mapear, mapeo pausado, reembolsos/
+  cancelaciones, reintentos, cursor por fecha, cantidades como texto o en 0). `tests/backends.test.js`
+  107 → ~130 comprobaciones (panel de Loyverse en pantalla, emparejar, pausar/reactivar, solo admin,
+  no disponible en modo demo/Sheets).
+- Nada de esto se ejecuta solo: falta correr el parche SQL, desplegar la función, configurar el
+  token de Loyverse y el cron — ver `docs/LOYVERSE.md`. `main` no se toca hasta probarlo con datos
+  reales y tu aprobación.
+
 ## [Sin publicar] — rama `feat/rediseno-azul`
 
 ### Cambiado (solo aspecto; los datos y la lógica no se tocan)
