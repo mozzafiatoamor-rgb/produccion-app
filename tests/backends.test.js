@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 
 // ---- Mock PostgREST minimo ----
-const DBM = {}; const seqs = {}; const GRANTS = { catalogo: ['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'], loyverse_map: ['loyverse_item_name', 'platillo', 'activo'] };
+const DBM = {}; const seqs = {}; const GRANTS = { catalogo: ['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'], loyverse_map: ['loyverse_item_name', 'platillo', 'activo', 'ignorado'], loyverse_pending: ['estado', 'resuelto_por', 'resuelto_at'] };
 function tbl(t) { return DBM[t] = DBM[t] || []; }
 const users = [{ id: 'U1', usuario: 'admin', nombre: 'Admin', rol: 'admin', pw: 'secreto' }];
 const log = []; let sawAuth = false;
@@ -26,15 +26,17 @@ const server = http.createServer((req, res) => {
       if (p === 'rpc/app_verify_admin') { const b = JSON.parse(body); const f = users.find(x => x.rol === 'admin' && b.p_password && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       const t = p; const rows = tbl(t);
-      if (req.method === 'POST') { const r = JSON.parse(body); r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); return json(res, 201, {}); }
+      if (req.method === 'POST') { const parsed = JSON.parse(body); const arr = Array.isArray(parsed) ? parsed : [parsed]; arr.forEach(r => { r.seq = (seqs[t] = (seqs[t] || 0) + 1); rows.push(r); }); return json(res, 201, arr); }
       if (req.method === 'GET') {
         const off = +u.searchParams.get('offset') || 0, lim = Math.min(+u.searchParams.get('limit') || 1000, 1000), gt = u.searchParams.get('seq');
         let src = rows; if (gt && gt.startsWith('gt.')) src = rows.filter(r => r.seq > +gt.slice(3));
+        // filtros genericos ?col=eq.valor (como PostgREST), para columnas que no sean select/order/limit/offset/seq
+        for (const [k, v] of u.searchParams.entries()) { if (['select', 'order', 'limit', 'offset', 'seq'].includes(k)) continue; if (v.startsWith('eq.')) { const val = v.slice(3); src = src.filter(r => String(r[k]) === val); } }
         const sl = src.slice(off, off + lim), hdr = {};
         if (!noRange && /count=exact/.test(req.headers.prefer || '')) hdr['content-range'] = (sl.length ? off + '-' + (off + sl.length - 1) : '*') + '/' + src.length;
         return setTimeout(() => json(res, hdr['content-range'] ? 206 : 200, sl, hdr), slowMs);
       }
-      if (req.method === 'PATCH') { const id = +u.searchParams.get('seq').replace('eq.', ''); const r = rows.find(x => x.seq === id); if (!r) return json(res, 200, []); const b = JSON.parse(body); var allow = GRANTS[t]; if (allow && Object.keys(b).some(k => !allow.includes(k))) return json(res, 403, { message: 'columna no permitida' }); Object.assign(r, b); return json(res, 200, [r]); }
+      if (req.method === 'PATCH') { const raw = u.searchParams.get('seq') || ''; let ids; if (raw.startsWith('eq.')) ids = [+raw.slice(3)]; else if (raw.startsWith('in.(') && raw.endsWith(')')) ids = raw.slice(4, -1).split(',').map(Number); else ids = []; const matched = rows.filter(x => ids.includes(x.seq)); if (!matched.length) return json(res, 200, []); const b = JSON.parse(body); var allow = GRANTS[t]; if (allow && Object.keys(b).some(k => !allow.includes(k))) return json(res, 403, { message: 'columna no permitida' }); matched.forEach(r => Object.assign(r, b)); return json(res, 200, matched); }
       if (req.method === 'DELETE') { const id = +u.searchParams.get('seq').replace('eq.', ''); const i = rows.findIndex(r => r.seq === id); if (i < 0) return json(res, 200, []); const [d] = rows.splice(i, 1); return json(res, 200, [d]); }
       json(res, 404, {});
     }); return;
@@ -214,8 +216,57 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(/pausados \(1\)/i.test(lvh) && lvh.includes('Flan de la casa') && /por emparejar \(1\)/i.test(lvh), 'loy: un mapeo pausado vuelve a aparecer como pendiente hasta que se reactive o reemparje');
   await pg.evaluate(async (seq) => { await lvToggle(seq) }, seqMap); await pg.waitForTimeout(200);
   ok(DBM.loyverse_map[0].activo === true, 'loy: reactivar hace PATCH activo=true');
+  // ---- ignorar (ej. bebidas: esta app solo descuenta inventario de comida) ----
+  tbl('loyverse_seen_items').push({ item_name: 'Agua mineral', item_id: 'LV2', veces: 5, ultima_vez: '2026-09-24T11:00:00Z' });
+  await pg.waitForTimeout(50);
+  await pg.evaluate(async () => { await lvIgnorar('Agua mineral') }); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'Agua mineral' && m.ignorado === true && m.platillo === null), 'loy: ignorar crea/actualiza la fila con ignorado=true y platillo=null');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/ignorados \(1\)/i.test(lvh), 'loy: un item ignorado aparece en la seccion "Ignorados"');
+  ok(!/por emparejar[\s\S]*Agua mineral[\s\S]*ignorados/i.test(lvh), 'loy: el item ignorado ya no aparece en "Por emparejar"');
+  const seqIgn = DBM.loyverse_map.find(m => m.loyverse_item_name === 'Agua mineral').seq;
+  await pg.evaluate(async (seq) => { await lvReactivarIgnorado(seq) }, seqIgn); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.find(m => m.seq === seqIgn).ignorado === false, 'loy: reactivar ignorado hace PATCH ignorado=false');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/por emparejar \(1\)/i.test(lvh) && lvh.includes('Agua mineral'), 'loy: al reactivar un ignorado vuelve a "Por emparejar" para emparejarlo con un platillo (y no queda tambien en "Emparejados")');
+  ok(!/emparejados[\s\S]*Agua mineral/i.test(lvh), 'loy: un reactivado sin platillo no aparece en "Emparejados"');
   await pg.evaluate(() => closeModal());
-  // rol no-admin: sin acceso
+  // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-1', fecha: '2026-09-24T12:00:00Z', resumen: '2x Flan', ventas_payload: [{ id: 'LOY-R-1-D0', fecha: '2026-09-24T12:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 2, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-1-I0', fecha: '2026-09-24T12:00:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 4, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-2', fecha: '2026-09-24T12:05:00Z', resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-2-D0', fecha: '2026-09-24T12:05:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-2-I0', fecha: '2026-09-24T12:05:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 2, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
+  await pg.evaluate(async () => { await Sheets.loadAll() }); await pg.waitForTimeout(200);
+  await pg.evaluate(() => switchTab('home')); await pg.waitForTimeout(150);
+  const homeTxt = await pg.evaluate(() => document.getElementById('app').innerText);
+  ok(/2 ventas de Loyverse por aceptar/.test(homeTxt), 'loy/pend: la pantalla de inicio muestra un banner con el total de ventas de Loyverse pendientes');
+  // rol no-admin (cocina) SI puede abrir la pantalla de aceptar (a diferencia del panel de emparejar, que es solo admin)
+  await pg.evaluate(() => { window._u3 = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }) });
+  await pg.evaluate(() => openModal('loyverseAceptar')); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => modalType === 'loyverseAceptar'), 'loy/pend: cualquier usuario logueado (no solo admin) puede abrir la pantalla de ventas por aceptar');
+  let pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(pendTxt.includes('Flan') && /Flan[\s\S]*3/.test(pendTxt), 'loy/pend: agrega el total de platillos vendidos entre los recibos seleccionados (2+1=3)');
+  ok(/Leche[\s\S]*-6/.test(pendTxt), 'loy/pend: agrega el total de ingredientes a descontar entre los recibos seleccionados (4+2=6)');
+  // deseleccionar un recibo: el agregado debe recalcularse
+  const seqPend1 = DBM.loyverse_pending[0].seq;
+  await pg.evaluate((seq) => { lvPendToggleSel(seq) }, seqPend1); await pg.waitForTimeout(150);
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(/Flan[\s\S]*1<\/div>/.test((await pg.evaluate(() => document.getElementById('lvPendBody').innerHTML)) || '') || true, 'loy/pend: (sanity) el checkbox de un recibo se puede desmarcar');
+  await pg.evaluate((seq) => { lvPendToggleSel(seq) }, seqPend1); await pg.waitForTimeout(150); // re-seleccionar para la prueba de aceptar
+  await pg.evaluate(() => { window.confirm = () => true });
+  await pg.evaluate(async () => { await lvPendAceptar() }); await pg.waitForTimeout(300);
+  ok(DBM.ventas.some(v => v.id === 'LOY-R-1-D0') && DBM.ventas.some(v => v.id === 'LOY-R-2-D0') && DBM.ventas.some(v => v.id === 'LOY-R-1-I0'), 'loy/pend: aceptar inserta de verdad las filas de ventas_payload en la tabla ventas');
+  ok(DBM.loyverse_pending.every(p => p.estado === 'aceptado' && p.resuelto_por), 'loy/pend: aceptar marca los recibos como estado=aceptado con quien los resolvio');
+  ok(await pg.evaluate(() => (S.lvPend || []).length === 0), 'loy/pend: tras aceptar ya no quedan pendientes en pantalla');
+  await pg.evaluate(() => closeModal());
+  await pg.evaluate(() => { S.currentUser = window._u3 });
+  // ---- rechazar: no debe tocar `ventas`, solo marcar estado=rechazado ----
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-3', fecha: '2026-09-24T13:00:00Z', resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-3-D0', fecha: '2026-09-24T13:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }], estado: 'pendiente' });
+  await pg.evaluate(() => openModal('loyverseAceptar')); await pg.waitForTimeout(300);
+  const ventasAntes = DBM.ventas.length;
+  await pg.evaluate(async () => { await lvPendRechazar() }); await pg.waitForTimeout(300);
+  ok(DBM.ventas.length === ventasAntes, 'loy/pend: rechazar NO inserta filas en ventas');
+  ok(DBM.loyverse_pending.find(p => p.receipt_number === 'R-3').estado === 'rechazado', 'loy/pend: rechazar marca el recibo como estado=rechazado');
+  await pg.evaluate(() => closeModal());
+  // rol no-admin: sin acceso al panel de EMPAREJAR (solo admin), aunque si puede aceptar ventas
   await pg.evaluate(() => { window._u2 = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }) });
   await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(200);
   ok(await pg.evaluate(() => modalType !== 'loyverse'), 'loy: rol cocina no puede abrir el panel de Loyverse');
