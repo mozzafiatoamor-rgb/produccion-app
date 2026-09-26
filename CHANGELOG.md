@@ -23,6 +23,14 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 - **Mapeo masivo**: en "Por emparejar" ya no hay que guardar producto por producto — se elige
   platillo (o se marca Ignorar) en varios productos a la vez y un solo botón "💾 Guardar" manda
   todos los cambios juntos en una sola petición.
+- **Autocompletado de platillo**: el selector de "Por emparejar" era un `<select>` con todos los
+  platillos, poco práctico con muchos productos y variantes. Ahora es un campo de texto con
+  autocompletado (datalist del navegador) que se filtra solo mientras escribes; si escribes algo
+  que no coincide con ningún platillo de Recetas, se rechaza y el campo se limpia.
+- **"🚫 Ignorar todos"**: un botón en "Por emparejar" marca de un tirón la casilla Ignorar en todos
+  los productos pendientes que todavía no tengan platillo elegido (sin tocar los que ya tienen uno
+  elegido en pantalla), para no tener que marcar uno por uno cuando hay muchos productos que esta
+  app no descuenta.
 - **Variantes de Loyverse (proteína, tipo de pasta, etc.)**: un platillo como "PST Amatriciana"
   siempre se llama igual en Loyverse aunque cambie la proteína o el tipo de pasta — esa elección
   viaja en el campo **variante** del producto (`variant_name`, ej. "Fetuccini / Pollo"), no en un

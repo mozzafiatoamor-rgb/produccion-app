@@ -64,14 +64,21 @@ Supabase → Edge Functions → Secrets.
 En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparecen tres listas:
 
 - **Por emparejar**: productos que Loyverse ya vendió y que todavía no tienen decisión. Por cada
-  uno se elige el platillo de Recetas que le corresponde ("Emparejar") o se marca **Ignorar** si
-  esta app no debe descontar su inventario (bebidas, por ejemplo).
+  uno se elige el platillo de Recetas que le corresponde escribiendo en el campo de texto (se va
+  filtrando solo, como un buscador, mientras escribes) o se marca **Ignorar** si esta app no debe
+  descontar su inventario (bebidas, por ejemplo). Si escribes algo que no coincide con ningún
+  platillo de Recetas, se rechaza y el campo se limpia (evita emparejar por error con un nombre que
+  no existe).
 - **Emparejados**: ya tienen un platillo asignado; se pueden pausar (vuelven a "Por emparejar"
   hasta que se reactiven o se re-emparejen).
 - **Ignorados**: nunca generan pendiente; se pueden reactivar en cualquier momento.
 
 Para elegir varios a la vez ya no hace falta guardar uno por uno: se elige platillo (o se marca
 Ignorar) en cuantos productos se quiera y un solo botón "💾 Guardar" manda todos los cambios juntos.
+El botón "🚫 Ignorar todos" marca de un tirón la casilla Ignorar en todos los productos pendientes
+que todavía no tengan un platillo elegido (útil cuando hay muchos productos que esta app no
+descuenta, como bebidas o paquetes); un producto al que ya le elegiste platillo en pantalla no se
+toca. Sigue haciendo falta presionar "💾 Guardar" para que se guarde de verdad.
 
 ## Variantes de Loyverse (proteína, tipo de pasta, etc.)
 

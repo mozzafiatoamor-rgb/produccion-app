@@ -213,7 +213,7 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(300);
   let lvh = await pg.evaluate(() => document.querySelector('.modal').innerText);
   ok(lvh.includes('Loyverse') && lvh.includes('Flan de la casa') && lvh.includes('Vendido 3 veces') && /1 recibos/.test(lvh), 'loy: el panel muestra el estado de la ultima sincronizacion y los productos pendientes de emparejar');
-  ok(await pg.evaluate(() => { const s = document.getElementById('lvSel_Flan_de_la_casa'); return !!s && [...s.options].some(o => o.value === 'Flan') }), 'loy: el selector de platillo se llena con los platillos de Recetas');
+  ok(await pg.evaluate(() => { const s = document.getElementById('lvSel_Flan_de_la_casa'), dl = document.getElementById('lvPlatillosList'); return !!s && s.tagName === 'INPUT' && s.getAttribute('list') === 'lvPlatillosList' && !!dl && [...dl.options].some(o => o.value === 'Flan') }), 'loy: el selector de platillo es un campo de texto con autocompletado (datalist) que se llena con los platillos de Recetas');
   await pg.evaluate(() => { document.getElementById('lvSel_Flan_de_la_casa').value = 'Flan'; });
   await pg.evaluate(async () => { await lvSaveMap('Flan de la casa') }); await pg.waitForTimeout(200);
   ok(DBM.loyverse_map.length === 1 && DBM.loyverse_map[0].loyverse_item_name === 'Flan de la casa' && DBM.loyverse_map[0].platillo === 'Flan' && DBM.loyverse_map[0].activo === true, 'loy: emparejar crea la fila en loyverse_map');
@@ -275,7 +275,7 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await lvLoad(); lvRefresh() }); await pg.waitForTimeout(150);
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(lvh.includes('PST ALFREDO - Fetuccini / Pollo') && lvh.includes('PST ALFREDO - Linguini / Camaron'), 'loy/variante: dos variantes del mismo producto base de Loyverse (mismo item_name) aparecen como dos filas separadas por emparejar, cada una con su nombre completo item_name + variante');
-  ok(await pg.evaluate(() => { const s = document.getElementById('lvSel_' + lvSlug('PST ALFREDO - Fetuccini / Pollo')); return !!s && [...s.options].some(o => o.value === 'Alfredo Fettuccini Pollo') }), 'loy/variante: el selector de platillo permite elegir la receta exacta de esa combinacion (pasta+proteina)');
+  ok(await pg.evaluate(() => { const dl = document.getElementById('lvPlatillosList'); return !!dl && [...dl.options].some(o => o.value === 'Alfredo Fettuccini Pollo') && [...dl.options].some(o => o.value === 'Alfredo Linguini Camaron') }), 'loy/variante: el autocompletado de platillo incluye la receta exacta de cada combinacion (pasta+proteina)');
   await pg.evaluate(() => { document.getElementById('lvSel_' + lvSlug('PST ALFREDO - Fetuccini / Pollo')).value = 'Alfredo Fettuccini Pollo'; });
   await pg.evaluate(async () => { await lvSaveMap('PST ALFREDO - Fetuccini / Pollo') }); await pg.waitForTimeout(200);
   ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'PST ALFREDO - Fetuccini / Pollo' && m.platillo === 'Alfredo Fettuccini Pollo'), 'loy/variante: emparejar una combinacion especifica crea su propia fila en loyverse_map con el nombre completo item+variante');
@@ -287,6 +287,24 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(/emparejados[\s\S]*PST ALFREDO - Fetuccini \/ Pollo/i.test(lvh) && /emparejados[\s\S]*PST ALFREDO - Linguini \/ Camaron/i.test(lvh), 'loy/variante: ambas combinaciones quedan emparejadas por separado, cada una a su receta exacta');
   ok(/por emparejar[\s\S]*CHAPATA - Mar y tierra/i.test(lvh), 'loy/variante: un producto+variante sin receta cargada todavia sigue pendiente, mostrando su nombre completo item_name + variante (no solo "CHAPATA")');
+  // ---- autocompletado del platillo (datalist, se filtra solo al escribir) y "Ignorar todos" en Por emparejar ----
+  tbl('loyverse_seen_items').push({ item_name: 'BEBIDA MISTERIOSA', item_id: 'LV13', veces: 3, ultima_vez: '2026-09-25T10:30:00Z' });
+  await pg.evaluate(async () => { await lvLoad(); lvRefresh() }); await pg.waitForTimeout(150);
+  await pg.evaluate(() => { const el = document.getElementById('lvSel_' + lvSlug('CHAPATA - Mar y tierra')); el.value = 'Un platillo que no existe'; el.dispatchEvent(new Event('change')) }); await pg.waitForTimeout(100);
+  ok(await pg.evaluate(() => document.getElementById('lvSel_' + lvSlug('CHAPATA - Mar y tierra')).value === ''), 'loy/autocomplete: escribir un platillo que no existe en la lista se rechaza y el campo se limpia');
+  ok(await pg.evaluate(() => !((S.lvMapSel || {})['CHAPATA - Mar y tierra'] || {}).platillo), 'loy/autocomplete: un platillo invalido no se guarda en la seleccion pendiente');
+  await pg.evaluate(() => { lvMapSelSet('CHAPATA - Mar y tierra', 'platillo', 'Flan') });
+  await pg.evaluate(() => { window.confirm = () => true });
+  await pg.evaluate(() => { lvIgnorarTodosPendientes() }); await pg.waitForTimeout(150);
+  ok(await pg.evaluate(() => (S.lvMapSel || {})['CHAPATA - Mar y tierra'].platillo === 'Flan' && !(S.lvMapSel['CHAPATA - Mar y tierra'].ignorar)), 'loy/ignorar-todos: no toca un producto que ya tiene un platillo elegido en pantalla (aunque no se haya guardado todavia)');
+  ok(await pg.evaluate(() => (S.lvMapSel || {})['BEBIDA MISTERIOSA'] && S.lvMapSel['BEBIDA MISTERIOSA'].ignorar === true), 'loy/ignorar-todos: marca Ignorar en los productos pendientes que todavia no tenian platillo elegido');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(await pg.evaluate(() => document.getElementById('lvSel_' + lvSlug('BEBIDA MISTERIOSA')).disabled === true), 'loy/ignorar-todos: el campo de platillo del producto recien marcado se deshabilita, igual que al marcarlo a mano');
+  await pg.evaluate(async () => { await lvGuardarCambios() }); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'CHAPATA - Mar y tierra' && m.platillo === 'Flan'), 'loy/ignorar-todos: el producto que ya tenia platillo elegido se guarda emparejado con ese platillo, no ignorado');
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'BEBIDA MISTERIOSA' && m.ignorado === true && m.platillo === null), 'loy/ignorar-todos: el producto marcado por el boton se guarda ignorado, junto con los demas cambios, al presionar Guardar');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(!/por emparejar[\s\S]*CHAPATA - Mar y tierra/i.test(lvh) && !/por emparejar[\s\S]*BEBIDA MISTERIOSA/i.test(lvh), 'loy/ignorar-todos: tras guardar, ninguno de los dos sigue en "Por emparejar"');
   await pg.evaluate(() => closeModal());
 
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
