@@ -68,9 +68,11 @@ En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparecen tr
   filtrando solo, como un buscador, mientras escribes) o se marca **Ignorar** si esta app no debe
   descontar su inventario (bebidas, por ejemplo). Si escribes algo que no coincide con ningún
   platillo de Recetas, se rechaza y el campo se limpia (evita emparejar por error con un nombre que
-  no existe).
+  no existe). Si hay más de 5 pendientes de golpe, aparece un buscador para esa lista.
 - **Emparejados**: ya tienen un platillo asignado; se pueden pausar (vuelven a "Por emparejar"
-  hasta que se reactiven o se re-emparejen).
+  hasta que se reactiven o se re-emparejen). Igual que Ignorados, esta lista viene colapsada (solo
+  se ve el total) para no ocupar toda la pantalla; al desplegarla, los productos aparecen agrupados
+  por la categoría de su receta (en orden alfabético) y tiene su propio buscador.
 - **Ignorados**: nunca generan pendiente; se pueden reactivar en cualquier momento. Esta lista
   viene colapsada (solo se ve el total) para no ocupar espacio cuando hay muchos; al desplegarla
   tiene su propio buscador para encontrar rápido el que quieras reactivar.

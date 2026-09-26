@@ -34,6 +34,13 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 - **Lista de Ignorados colapsable, con buscador**: para que no sea una lista larga siempre visible,
   ahora empieza colapsada (solo se ve el total) y se despliega con un clic; ya desplegada, tiene su
   propio buscador para encontrar rápido un producto y reactivarlo.
+- **Lista de Emparejados colapsable, agrupada por categoría, con buscador**: igual que Ignorados,
+  "Emparejados" ahora empieza colapsada (solo se ve el total) para no ocupar toda la pantalla cuando
+  ya hay muchos productos emparejados; al desplegarla, los productos aparecen agrupados por la
+  categoría de su receta (Recetas), en orden alfabético, y tiene su propio buscador por nombre.
+- **Buscador en "Por emparejar"**: cuando hay más de 5 productos pendientes de emparejar de una vez
+  (por ejemplo tras revisar el historial de ventas), aparece un buscador para encontrar uno rápido
+  sin tener que hacer scroll por toda la lista.
 - **Variantes de Loyverse (proteína, tipo de pasta, etc.)**: un platillo como "PST Amatriciana"
   siempre se llama igual en Loyverse aunque cambie la proteína o el tipo de pasta — esa elección
   viaja en el campo **variante** del producto (`variant_name`, ej. "Fetuccini / Pollo"), no en un

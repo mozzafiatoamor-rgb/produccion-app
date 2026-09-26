@@ -285,7 +285,19 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await lvSaveMap('PST ALFREDO - Linguini / Camaron') }); await pg.waitForTimeout(200);
   ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'PST ALFREDO - Linguini / Camaron' && m.platillo === 'Alfredo Linguini Camaron'), 'loy/variante: la segunda variante se mapea a su propia receta exacta, independiente de la primera');
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  // ---- lista de Emparejados colapsable, agrupada por categoria de receta, con su propio buscador ----
+  ok(/emparejados \(5\)/i.test(lvh) && !lvh.includes('PST ALFREDO - Fetuccini / Pollo') && !lvh.includes('PST ALFREDO - Linguini / Camaron') && !lvh.includes('Flan de la casa'), 'loy/emparejados: la lista de Emparejados viene colapsada por defecto (se ve el total pero no los productos uno por uno)');
+  await pg.evaluate(() => { lvActToggleOpen() }); await pg.waitForTimeout(100);
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(await pg.evaluate(() => !!document.getElementById('lvActList')), 'loy/emparejados: desplegada, la lista tiene su propio buscador');
   ok(/emparejados[\s\S]*PST ALFREDO - Fetuccini \/ Pollo/i.test(lvh) && /emparejados[\s\S]*PST ALFREDO - Linguini \/ Camaron/i.test(lvh), 'loy/variante: ambas combinaciones quedan emparejadas por separado, cada una a su receta exacta');
+  const iPastas = lvh.search(/pastas \(2\)/i), iPostres = lvh.search(/postres \(3\)/i), iFet = lvh.indexOf('PST ALFREDO - Fetuccini / Pollo'), iLin = lvh.indexOf('PST ALFREDO - Linguini / Camaron'), iFlanCasa = lvh.indexOf('Flan de la casa');
+  ok(iPastas >= 0 && iPostres >= 0 && iPastas < iFet && iFet < iLin && iLin < iPostres && iPostres < iFlanCasa, 'loy/emparejados: los productos quedan agrupados por categoria de receta (Pastas antes de Postres), cada uno bajo su encabezado');
+  await pg.evaluate(() => { S.lvActQ = 'linguini' }); const lvActTxt = await pg.evaluate(() => { lvActRefresh(); return document.getElementById('lvActList').innerText });
+  ok(lvActTxt.includes('PST ALFREDO - Linguini / Camaron') && !lvActTxt.includes('PST ALFREDO - Fetuccini / Pollo') && !lvActTxt.includes('Flan de la casa'), 'loy/emparejados: el buscador de Emparejados filtra por nombre sin perder el resto de la pantalla');
+  await pg.evaluate(() => { S.lvActQ = ''; lvActRefresh(); lvActToggleOpen() }); await pg.waitForTimeout(100);
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/emparejados \(5\)/i.test(lvh) && !lvh.includes('PST ALFREDO - Fetuccini / Pollo'), 'loy/emparejados: se puede volver a colapsar la lista');
   ok(/por emparejar[\s\S]*CHAPATA - Mar y tierra/i.test(lvh), 'loy/variante: un producto+variante sin receta cargada todavia sigue pendiente, mostrando su nombre completo item_name + variante (no solo "CHAPATA")');
   // ---- autocompletado del platillo (datalist, se filtra solo al escribir) y "Ignorar todos" en Por emparejar ----
   tbl('loyverse_seen_items').push({ item_name: 'BEBIDA MISTERIOSA', item_id: 'LV13', veces: 3, ultima_vez: '2026-09-25T10:30:00Z' });
@@ -319,6 +331,20 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(DBM.loyverse_map.find(m => m.seq === seqRefresco).ignorado === false, 'loy/ignorados: se puede reactivar un producto encontrado con el buscador, igual que antes');
   await pg.evaluate(() => { S.lvIgnQ = '' }); lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(/ignorados \(1\)/i.test(lvh), 'loy/ignorados: al reactivarlo el contador de ignorados baja (ya solo queda BEBIDA MISTERIOSA)');
+  // ---- buscador en "Por emparejar" cuando hay varios productos pendientes de golpe (para no scrollear una lista larga) ----
+  const pendAntes = await pg.evaluate(() => lvPendientes().length);
+  ['Tacos al pastor', 'Quesadilla queso', 'Torta cubana', 'Sopes', 'Elote preparado', 'Agua de horchata'].forEach((n, i) => { tbl('loyverse_seen_items').push({ item_name: n, item_id: 'LVX' + i, veces: 1, ultima_vez: '2026-09-25T12:00:00Z' }) });
+  await pg.evaluate(async () => { await lvLoad(); lvRefresh() }); await pg.waitForTimeout(150);
+  const pendDespues = await pg.evaluate(() => lvPendientes().length);
+  ok(pendDespues === pendAntes + 6 && pendDespues > 5, 'loy/buscar-pendientes: con varios productos de golpe, se siguen contando todos los pendientes');
+  ok(await pg.evaluate(() => document.querySelector('#lvBody input[placeholder*="pendientes"]') !== null), 'loy/buscar-pendientes: con mas de 5 pendientes aparece un buscador para esa lista');
+  await pg.evaluate(() => { S.lvMapQ = 'taco' }); const lvPendTxt = await pg.evaluate(() => { lvMapPendRefresh(); return document.getElementById('lvMapPendList').innerText });
+  ok(lvPendTxt.includes('Tacos al pastor') && !lvPendTxt.includes('Quesadilla queso') && !lvPendTxt.includes('Sopes'), 'loy/buscar-pendientes: el buscador filtra "Por emparejar" por nombre sin perder el resto de la pantalla');
+  await pg.evaluate(() => { S.lvMapQ = ''; lvMapPendRefresh() });
+  await pg.evaluate(() => { window.confirm = () => true; lvIgnorarTodosPendientes() }); await pg.waitForTimeout(150);
+  await pg.evaluate(async () => { await lvGuardarCambios() }); await pg.waitForTimeout(250);
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(lvh.includes('No hay productos de Loyverse pendientes de emparejar'), 'loy/buscar-pendientes: tras ignorarlos y guardar, "Por emparejar" vuelve a estar vacio');
   await pg.evaluate(() => closeModal());
 
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
