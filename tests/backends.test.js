@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 
 // ---- Mock PostgREST minimo ----
-const DBM = {}; const seqs = {};
+const DBM = {}; const seqs = {}; const GRANTS = { catalogo: ['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'], loyverse_map: ['loyverse_item_name', 'platillo', 'activo'] };
 function tbl(t) { return DBM[t] = DBM[t] || []; }
 const users = [{ id: 'U1', usuario: 'admin', nombre: 'Admin', rol: 'admin', pw: 'secreto' }];
 const log = []; let sawAuth = false;
@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
         if (!noRange && /count=exact/.test(req.headers.prefer || '')) hdr['content-range'] = (sl.length ? off + '-' + (off + sl.length - 1) : '*') + '/' + src.length;
         return setTimeout(() => json(res, hdr['content-range'] ? 206 : 200, sl, hdr), slowMs);
       }
-      if (req.method === 'PATCH') { const id = +u.searchParams.get('seq').replace('eq.', ''); const r = rows.find(x => x.seq === id); if (!r) return json(res, 200, []); const b = JSON.parse(body); if (Object.keys(b).some(k => !['id', 'categoria', 'producto', 'stock_minimo', 'unidad', 'activo'].includes(k))) return json(res, 403, { message: 'columna no permitida' }); Object.assign(r, b); return json(res, 200, [r]); }
+      if (req.method === 'PATCH') { const id = +u.searchParams.get('seq').replace('eq.', ''); const r = rows.find(x => x.seq === id); if (!r) return json(res, 200, []); const b = JSON.parse(body); var allow = GRANTS[t]; if (allow && Object.keys(b).some(k => !allow.includes(k))) return json(res, 403, { message: 'columna no permitida' }); Object.assign(r, b); return json(res, 200, [r]); }
       if (req.method === 'DELETE') { const id = +u.searchParams.get('seq').replace('eq.', ''); const i = rows.findIndex(r => r.seq === id); if (i < 0) return json(res, 200, []); const [d] = rows.splice(i, 1); return json(res, 200, [d]); }
       json(res, 404, {});
     }); return;
@@ -93,6 +93,9 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(dc.todos === 4 && dc.act === 4, 'demo: catalogoTodos incluye todos los productos (' + JSON.stringify(dc) + ')');
   ok(await pg.evaluate(async () => { const r = S.catalogoTodos[0]; await Sheets.updateRow(CAT_SHEET, r._row, [r.id, r.categoria, r.producto, r.stockMinimo, r.unidad, 'NO']); await Sheets.loadAll(); return S.catalogo.length === 3 && S.catalogoTodos.length === 4 && S.catalogoTodos[0].activo === 'NO' }), 'demo: updateRow desactiva un producto (sale de catalogo, sigue en catalogoTodos)');
   ok(await pg.evaluate(async () => { try { await Sheets.updateRow(CAT_SHEET, 999, ['x', 'y', 'z', 0, '', 'SI']); return false } catch (e) { return true } }), 'demo: updateRow de fila inexistente lanza error');
+  await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => document.querySelector('.modal').innerText.includes('solo est\u00e1 disponible usando Supabase')), 'demo: el panel de Loyverse avisa que solo funciona con Supabase');
+  await pg.evaluate(() => closeModal());
   // cola offline con backend demo: fallo forzado
   await pg.evaluate(() => { DEMO.append = async () => { throw new Error('x') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V9', today(), 'x', 'y', 1, 'z', '']) } catch (e) { } });
@@ -190,6 +193,33 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await cmToggle(2) });
   await pg.evaluate(() => { SBK.req = window._o });
   ok(DBM.catalogo[0].activo === true && await pg.evaluate(() => S.catalogo.some(p => p.producto === 'Cheesecake' && p.categoria === 'Pasteles')), 'cat/sb: si falla la red no cambia nada (ni en la DB ni en pantalla)');
+
+  // ---- integracion con Loyverse (solo admin, solo Supabase) ----
+  tbl('loyverse_seen_items').push({ item_name: 'Flan de la casa', item_id: 'LV1', veces: 3, ultima_vez: '2026-09-24T10:00:00Z' });
+  tbl('loyverse_sync_state').push({ id: 1, last_created_at: '2026-09-24T10:00:00Z', last_run_at: '2026-09-24T10:05:00Z', last_run_ok: true, last_run_detalle: '1 recibos, 2 filas de venta, 0 productos sin mapear, 0 omitidos' });
+  await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(300);
+  let lvh = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(lvh.includes('Loyverse') && lvh.includes('Flan de la casa') && lvh.includes('Vendido 3 veces') && /1 recibos/.test(lvh), 'loy: el panel muestra el estado de la ultima sincronizacion y los productos pendientes de emparejar');
+  ok(await pg.evaluate(() => { const s = document.getElementById('lvSel_Flan_de_la_casa'); return !!s && [...s.options].some(o => o.value === 'Flan') }), 'loy: el selector de platillo se llena con los platillos de Recetas');
+  await pg.evaluate(() => { document.getElementById('lvSel_Flan_de_la_casa').value = 'Flan'; });
+  await pg.evaluate(async () => { await lvSaveMap('Flan de la casa') }); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.length === 1 && DBM.loyverse_map[0].loyverse_item_name === 'Flan de la casa' && DBM.loyverse_map[0].platillo === 'Flan' && DBM.loyverse_map[0].activo === true, 'loy: emparejar crea la fila en loyverse_map');
+  ok(DBM.bitacora.some(b => /Mapeo Loyverse/.test(JSON.stringify(b)) && /Flan de la casa/.test(JSON.stringify(b))), 'loy: el emparejamiento queda en la bitacora');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(lvh.includes('No hay productos de Loyverse pendientes') && /emparejados \(1\)/i.test(lvh), 'loy: tras emparejar ya no aparece como pendiente y pasa a "Emparejados"');
+  const seqMap = DBM.loyverse_map[0].seq;
+  await pg.evaluate(async (seq) => { await lvToggle(seq) }, seqMap); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map[0].activo === false, 'loy: pausar hace PATCH activo=false');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/pausados \(1\)/i.test(lvh) && lvh.includes('Flan de la casa') && /por emparejar \(1\)/i.test(lvh), 'loy: un mapeo pausado vuelve a aparecer como pendiente hasta que se reactive o reemparje');
+  await pg.evaluate(async (seq) => { await lvToggle(seq) }, seqMap); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map[0].activo === true, 'loy: reactivar hace PATCH activo=true');
+  await pg.evaluate(() => closeModal());
+  // rol no-admin: sin acceso
+  await pg.evaluate(() => { window._u2 = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }) });
+  await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType !== 'loyverse'), 'loy: rol cocina no puede abrir el panel de Loyverse');
+  await pg.evaluate(() => { S.currentUser = window._u2 });
   // paginacion: 2500 filas
   for (let i = 0; i < 2500; i++) tbl('mermas').push({ seq: (seqs.mermas = (seqs.mermas || 0) + 1), id: 'M' + i, fecha: '2026-09-01', hora: '', categoria: 'c', producto: 'Cheesecake', cantidad: 1, motivo: '', responsable: '' });
   const nm = await pg.evaluate(async () => (await Sheets.read('⚠️ Mermas', 'A2:H50000')).length);
