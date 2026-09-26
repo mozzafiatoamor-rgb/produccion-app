@@ -5,39 +5,56 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 
 ## [Sin publicar] — rama `feat/loyverse-integration`
 
-### Agregado — descuento automático de inventario desde Loyverse (solo Mozzafiato)
+### Agregado — ventas de Loyverse por aceptar, con descuento de inventario de comida (solo Mozzafiato)
 - Nueva sincronización periódica (Edge Function `loyverse-sync`, se llama sola cada pocos
-  minutos vía cron de Supabase — ver `docs/LOYVERSE.md`): lee los recibos nuevos de Loyverse,
-  los cruza con **Recetas** y descuenta los ingredientes exactamente como hace hoy "Venta TPV"
-  a mano (misma tabla `ventas`, mismas reglas de redondeo hacia arriba sumando por recibo antes
-  de redondear). "Venta TPV" **no se quita**: sigue disponible como respaldo manual.
+  minutos vía cron de Supabase — ver `docs/LOYVERSE.md`): lee los recibos nuevos de Loyverse y los
+  cruza con **Recetas**. **Cambio de diseño tras probar con datos reales**: en vez de descontar el
+  inventario apenas se detecta la venta, arma una fila **pendiente** por recibo (con el platillo
+  vendido + el descuento de ingredientes que se aplicaría). Un usuario logueado la revisa y la
+  acepta o rechaza desde la app — igual que se hacía a mano al cerrar turno — y solo al aceptar se
+  escribe de verdad en `ventas` y se descuenta el inventario. "Venta TPV" **no se quita**: sigue
+  disponible como respaldo manual.
 - **Mapeo de productos** (Ajustes → 🔗 Loyverse, solo admin): como los nombres de producto en
   Loyverse no necesariamente coinciden con los platillos de Recetas, cada producto vendido en
-  Loyverse aparece una vez en "Por emparejar" hasta que el admin elige a qué platillo corresponde;
-  después queda recordado (se puede pausar/reactivar). Mientras un producto no está emparejado,
-  su venta no descuenta nada del inventario (queda visible como pendiente, no se pierde ni se
-  inventa un descuento).
-- Reembolsos y recibos cancelados se detectan y se omiten por completo (no descuentan).
+  Loyverse aparece una vez en "Por emparejar" hasta que el admin elige a qué platillo corresponde
+  o lo marca **Ignorar** (por ejemplo una bebida: esta app solo lleva inventario de comida); un
+  producto ignorado no vuelve a pedirse y se puede reactivar en cualquier momento. Un mapeo se
+  puede pausar/reactivar.
+- **Pantalla de ventas pendientes** (banner en Inicio, visible para cualquier usuario logueado):
+  muestra el total agregado por platillo vendido y por ingrediente a descontar entre los recibos
+  seleccionados (todos por defecto, con casilla para incluir/excluir alguno), y botones
+  Aceptar/Rechazar.
+- Reembolsos y recibos cancelados se detectan y se omiten por completo (no generan pendiente).
 - Un recibo nunca se aplica dos veces así se cruce un reintento con la siguiente corrida:
   cursor por fecha + tabla `loyverse_processed_receipts` + índice único parcial en `ventas.id`
-  (solo para los ids sintéticos `LOY-*`, no afecta los ids normales).
-- `supabase/patches/003_loyverse.sql` (y `schema.sql`): tablas `loyverse_map`,
-  `loyverse_seen_items`, `loyverse_sync_state`, `loyverse_processed_receipts`, RLS y permisos
-  para `anon` (leer/administrar el mapeo desde el navegador; las otras tres solo lectura, las
-  escribe la Edge Function con la llave de servicio). **Hay que ejecutarlo en el SQL Editor antes
-  de publicar.**
+  (solo para los ids sintéticos `LOY-*`, no afecta los ids normales); cada fila de un recibo
+  (platillo o ingrediente) tiene su propio id, así que un recibo con dos platillos distintos ya no
+  pierde silenciosamente una de las ventas.
+- `supabase/patches/003_loyverse.sql` + `004_loyverse_pendientes.sql` (y `schema.sql`): tablas
+  `loyverse_map`, `loyverse_seen_items`, `loyverse_sync_state`, `loyverse_processed_receipts`,
+  `loyverse_pending`; `loyverse_map.platillo` admite NULL (productos ignorados); RLS y permisos
+  para `anon` (leer/administrar el mapeo y aceptar/rechazar pendientes desde el navegador; el
+  resto solo lectura, lo escribe la Edge Function con la llave de servicio). **Hay que ejecutar
+  ambos parches en el SQL Editor antes de publicar** (003 ya se corrió; falta 004).
 - `supabase/functions/loyverse-sync/`: `logic.mjs` (lógica pura, sin red — probada con Node) +
-  `index.ts` (Edge Function Deno: llama a la API de Loyverse, llama a `logic.mjs`, escribe en
-  Supabase). Modo `LOYVERSE_DRY_RUN=true` para probar sin escribir nada en el primer despliegue
-  (recomendado: revisar juntos el resultado antes de desactivarlo).
-- Pruebas: `tests/loyverse-sync.test.js` (27 comprobaciones de la lógica pura: mapeo, suma de
-  ingredientes compartidos antes de redondear, productos sin mapear, mapeo pausado, reembolsos/
-  cancelaciones, reintentos, cursor por fecha, cantidades como texto o en 0). `tests/backends.test.js`
-  107 → ~130 comprobaciones (panel de Loyverse en pantalla, emparejar, pausar/reactivar, solo admin,
-  no disponible en modo demo/Sheets).
-- Nada de esto se ejecuta solo: falta correr el parche SQL, desplegar la función, configurar el
-  token de Loyverse y el cron — ver `docs/LOYVERSE.md`. `main` no se toca hasta probarlo con datos
-  reales y tu aprobación.
+  `index.ts` (Edge Function Deno: llama a la API de Loyverse, llama a `logic.mjs`, arma los
+  pendientes en Supabase). **Ya desplegada y validada contra la cuenta real de Loyverse**
+  (dry-run primero, luego real); falta redesplegar con el código de este cambio.
+- Tres corridas contra datos reales (no detectables con datos sintéticos) encontradas y
+  corregidas: falta de permisos de `service_role` sobre las tablas nuevas (el `grant` de
+  `schema.sql` es una foto del momento en que corre, no cubre tablas creadas después por un
+  parche — ahora cada parche nuevo da permisos explícitos); primera corrida pedía el historial
+  completo de Loyverse y tronaba con 402 (plan sin "Unlimited Sales History") — ahora la primera
+  corrida solo inicializa el cursor, sin importar ventas previas a la activación; formato de fecha
+  (Postgres manda `+00:00`, Loyverse exige `Z`) — se normaliza antes de mandarlo.
+- Pruebas: `tests/loyverse-sync.test.js` (36 comprobaciones de la lógica pura: mapeo, ignorado,
+  suma de ingredientes compartidos antes de redondear, productos sin mapear, mapeo pausado,
+  reembolsos/cancelaciones, reintentos, cursor por fecha, ids únicos por fila, cantidades como
+  texto o en 0). `tests/backends.test.js` (Playwright): panel de emparejar/ignorar (solo admin) y
+  pantalla de aceptar/rechazar ventas pendientes (cualquier usuario logueado): banner de Inicio,
+  agregación de totales, aceptar inserta las ventas y marca `aceptado`, rechazar no toca `ventas`.
+- Falta: correr el parche 004 y redesplegar la función — ver `docs/LOYVERSE.md`. `main` no se toca
+  hasta probar el nuevo flujo de aceptación con datos reales y tu aprobación.
 
 ## [Sin publicar] — rama `feat/rediseno-azul`
 

@@ -1,82 +1,78 @@
-# Integración con Loyverse (descuento automático de inventario)
+# Integración con Loyverse (ventas por aceptar, descuento de inventario)
 
 Rama: `feat/loyverse-integration`. Nada de esto toca `main` ni Loyverse en sí (solo lee recibos);
-lo único que escribe es tu base de Supabase, igual que hace la app hoy con "Venta TPV".
+lo único que escribe es tu base de Supabase.
 
 ## Qué hace
 
-Cada pocos minutos, una función revisa los recibos nuevos de Loyverse (Mozzafiato), y por cada
-producto vendido que ya esté emparejado con un platillo de **Recetas**, agrega en `ventas`:
+Cada pocos minutos, la función `loyverse-sync` revisa los recibos nuevos de Loyverse (Mozzafiato).
+Por cada recibo con al menos un producto ya emparejado con un platillo de **Recetas** (y que no
+esté marcado como "ignorado"), arma una fila **pendiente** con las ventas que se aplicarían (el
+platillo vendido + el descuento de ingredientes, ya sumado y redondeado hacia arriba) — pero **no
+descuenta nada todavía**.
 
-- una fila del platillo vendido (para que aparezca en reportes, igual que "Venta TPV"), y
-- una fila por cada ingrediente de la receta, ya sumada y redondeada hacia arriba, para descontar
-  el inventario — igual que si lo hubieras registrado a mano en "Venta TPV".
+Un usuario logueado revisa esas ventas pendientes desde la app (banner en Inicio → "Revisar") y
+las acepta o rechaza, igual que se hacía a mano al cerrar turno: se ve un agregado de todo lo
+pendiente (cuánto se vendió de cada platillo y cuánto se va a descontar de cada ingrediente) y se
+puede aceptar o rechazar por recibo o todo junto. Solo al aceptar se insertan de verdad las filas
+en `ventas` y se descuenta el inventario.
 
 "Venta TPV" sigue ahí sin cambios: es tu respaldo manual si algún día la sincronización falla o
 quieres registrar algo que no pasó por Loyverse.
 
-Los recibos reembolsados o cancelados se detectan y se ignoran (no descuentan nada). Un recibo
+Los recibos reembolsados o cancelados se detectan y se ignoran (no generan pendiente). Un recibo
 nunca se aplica dos veces, aunque la función se cruce consigo misma o se reintente.
 
-## Lo que falta para que funcione (nada de esto está hecho todavía)
+### Bebidas y otros productos que esta app no descuenta
 
-### 1. Ejecutar el parche SQL
+Esta app solo lleva inventario de comida. En Ajustes → 🔗 Loyverse, cualquier producto de la lista
+"Por emparejar" se puede marcar **Ignorar** (por ejemplo una bebida) en vez de emparejarlo con un
+platillo: no vuelve a pedirse que se empareje y sus ventas nunca generan un pendiente de descuento.
+Un producto ignorado se puede "Reactivar" en cualquier momento si luego sí quieres empatarlo con un
+platillo (por ejemplo si empiezas a llevar inventario de esa bebida).
 
-En Supabase → SQL Editor, pegar y correr `supabase/patches/003_loyverse.sql`. Es el mismo patrón
-que los parches anteriores (idempotente, solo toca `produccion_app`).
+## Estado del despliegue
 
-### 2. Desplegar la función `loyverse-sync`
+Ya desplegado y validado contra la cuenta real de Loyverse (dry-run, luego real). Falta correr el
+parche 004 (abajo) y redesplegar la función con el código de este cambio.
 
-El código ya está en `supabase/functions/loyverse-sync/` (`index.ts` + `logic.mjs`). Para subirla
-a Supabase hace falta la CLI de Supabase (no viene instalada en tu compu todavía):
+### Aplicar el parche 004
+
+En Supabase → SQL Editor, pegar y correr `supabase/patches/004_loyverse_pendientes.sql`. Agrega la
+tabla `loyverse_pending`, permite `platillo` en NULL para productos ignorados, y agrega la columna
+`ignorado` a `loyverse_map`. Es idempotente, igual que los parches anteriores.
+
+### Redesplegar la función
+
+Desde tu Terminal (no desde aquí, por la política de red de tu cuenta):
 
 ```
-npm install -g supabase
-supabase login
-supabase link --project-ref <tu-project-ref>          # el que ya usas para produccion_app
-supabase functions deploy loyverse-sync
+cd produccion-app
+npx supabase@latest functions deploy loyverse-sync --use-api
 ```
 
-El `<project-ref>` es el que aparece en la URL de tu proyecto (`https://<project-ref>.supabase.co`).
-Si prefieres no instalar nada, dime y lo vemos juntos por videollamada o buscamos si tu plan de
-Supabase permite pegar el código directo desde el dashboard (varía según el plan y no lo pude
-confirmar desde aquí).
+Los secretos (`LOYVERSE_TOKEN`, `LOYVERSE_DRY_RUN`) no cambian — ya están configurados en
+Supabase → Edge Functions → Secrets.
 
-### 3. Configurar el token de Loyverse y el modo de prueba
+## Emparejar tus productos
 
-En Supabase → Project Settings → Edge Functions → Secrets, agregar:
+En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparecen tres listas:
 
-- `LOYVERSE_TOKEN`: un Personal Access Token creado en Loyverse Back Office → Access Tokens
-  (no hace falta nada más para leer recibos).
-- `LOYVERSE_DRY_RUN` = `true` (así, en modo prueba, la función **no escribe nada** — solo devuelve
-  un JSON con lo que *habría* insertado).
+- **Por emparejar**: productos que Loyverse ya vendió y que todavía no tienen decisión. Por cada
+  uno se elige el platillo de Recetas que le corresponde ("Emparejar") o se marca **Ignorar** si
+  esta app no debe descontar su inventario (bebidas, por ejemplo).
+- **Emparejados**: ya tienen un platillo asignado; se pueden pausar (vuelven a "Por emparejar"
+  hasta que se reactiven o se re-emparejen).
+- **Ignorados**: nunca generan pendiente; se pueden reactivar en cualquier momento.
 
-### 4. Probar en modo prueba y confirmar juntos los nombres de campo
+## Aceptar/rechazar ventas pendientes
 
-Los nombres exactos que la API de Loyverse usa en sus recibos (`item_name`, `quantity`,
-`receipt_number`, `created_at`, `cancelled_at`, etc.) los tomé de la documentación pública, pero
-**no los pude verificar contra datos reales tuyos** desde aquí. Antes de desactivar el modo
-prueba, hay que:
-
-1. Llamar la función una vez (desde el dashboard de Supabase, botón "Invoke", o con `curl`).
-2. Revisar el JSON de respuesta juntos: ¿aparecen tus recibos reales? ¿las cantidades y nombres
-   de producto se ven correctos?
-3. Si algo no cuadra (por ejemplo si Loyverse usa otro nombre de campo en tu cuenta), se ajusta
-   `logic.mjs` antes de seguir — es un archivo aparte, sin red, fácil de corregir y volver a
-   probar con `node tests/loyverse-sync.test.js`.
-
-### 5. Desactivar el modo prueba y programar la corrida periódica
-
-Cuando el modo prueba se vea bien, cambiar `LOYVERSE_DRY_RUN` a `false` y programar un cron de
-Supabase (Database → Cron Jobs, o `pg_cron` desde SQL) que llame la función cada pocos minutos.
-
-### 6. Emparejar tus productos
-
-En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparece la lista de productos que
-Loyverse ya vendió y que todavía no tienen platillo asignado ("Por emparejar"). Se elige el
-platillo de Recetas que le corresponde a cada uno y "Emparejar". Mientras un producto no está
-emparejado, sus ventas no descuentan inventario (quedan pendientes, visibles en el panel — no se
-pierden ni se inventa un descuento).
+Cualquier usuario logueado (no solo admin) ve, en la pantalla de Inicio, un aviso cuando hay ventas
+de Loyverse por aceptar, con un botón "Revisar" que abre la pantalla de aceptación. Ahí se ve, para
+los recibos seleccionados (todos por defecto): el total por platillo vendido y el total a
+descontar por ingrediente, más la lista de recibos individuales con casilla para incluir/excluir
+alguno antes de aceptar. "Aceptar" inserta esas ventas de verdad (descuenta inventario) y marca los
+recibos como `aceptado`; "Rechazar" los marca como `rechazado` sin tocar el inventario.
 
 ## Alcance actual
 
@@ -85,7 +81,8 @@ sucursal en Loyverse, hay que revisar si la función necesita filtrar por `store
 
 ## Pruebas
 
-- `node tests/loyverse-sync.test.js` — lógica pura (mapeo, redondeo, reembolsos, reintentos,
-  cursor, etc.), no necesita Deno ni red.
-- `tests/backends.test.js` (Playwright) — cubre el panel de Loyverse en la app: emparejar,
-  pausar/reactivar, que solo lo vea el admin, que no aparezca en modo demo/Sheets.
+- `node tests/loyverse-sync.test.js` — lógica pura (mapeo, ignorado, redondeo, reembolsos,
+  reintentos, cursor, colisión de ids, etc.), no necesita Deno ni red.
+- `node tests/backends.test.js` (Playwright) — cubre el panel de emparejar/ignorar (solo admin) y
+  la pantalla de aceptar/rechazar ventas pendientes (cualquier usuario logueado), incluyendo el
+  banner de Inicio, la agregación de totales y que aceptar/rechazar escriban lo correcto.
