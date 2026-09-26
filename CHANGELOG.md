@@ -31,6 +31,9 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   los productos pendientes que todavía no tengan platillo elegido (sin tocar los que ya tienen uno
   elegido en pantalla), para no tener que marcar uno por uno cuando hay muchos productos que esta
   app no descuenta.
+- **Lista de Ignorados colapsable, con buscador**: para que no sea una lista larga siempre visible,
+  ahora empieza colapsada (solo se ve el total) y se despliega con un clic; ya desplegada, tiene su
+  propio buscador para encontrar rápido un producto y reactivarlo.
 - **Variantes de Loyverse (proteína, tipo de pasta, etc.)**: un platillo como "PST Amatriciana"
   siempre se llama igual en Loyverse aunque cambie la proteína o el tipo de pasta — esa elección
   viaja en el campo **variante** del producto (`variant_name`, ej. "Fetuccini / Pollo"), no en un

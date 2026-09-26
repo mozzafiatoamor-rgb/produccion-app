@@ -305,6 +305,20 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'BEBIDA MISTERIOSA' && m.ignorado === true && m.platillo === null), 'loy/ignorar-todos: el producto marcado por el boton se guarda ignorado, junto con los demas cambios, al presionar Guardar');
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(!/por emparejar[\s\S]*CHAPATA - Mar y tierra/i.test(lvh) && !/por emparejar[\s\S]*BEBIDA MISTERIOSA/i.test(lvh), 'loy/ignorar-todos: tras guardar, ninguno de los dos sigue en "Por emparejar"');
+  // ---- lista de Ignorados colapsable con buscador (para que no sea una lista larga) ----
+  ok(/ignorados \(2\)/i.test(lvh) && !lvh.includes('Refresco Cola') && !lvh.includes('BEBIDA MISTERIOSA'), 'loy/ignorados: la lista viene colapsada por defecto (se ve el total pero no los productos uno por uno)');
+  await pg.evaluate(() => { lvIgnToggleOpen() }); await pg.waitForTimeout(100);
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(lvh.includes('Refresco Cola') && lvh.includes('BEBIDA MISTERIOSA'), 'loy/ignorados: al desplegarla se ven todos los productos ignorados');
+  ok(await pg.evaluate(() => !!document.getElementById('lvIgnList')), 'loy/ignorados: desplegada, la lista tiene su propio buscador');
+  await pg.evaluate(() => { S.lvIgnQ = 'refresco'; lvIgnRefresh() }); await pg.waitForTimeout(100);
+  let ignListTxt = await pg.evaluate(() => document.getElementById('lvIgnList').innerText);
+  ok(ignListTxt.includes('Refresco Cola') && !ignListTxt.includes('BEBIDA MISTERIOSA'), 'loy/ignorados: el buscador filtra por nombre (sin acentos/mayusculas) sin perder el resto de la pantalla');
+  const seqRefresco = DBM.loyverse_map.find(m => m.loyverse_item_name === 'Refresco Cola').seq;
+  await pg.evaluate(async (seq) => { await lvReactivarIgnorado(seq) }, seqRefresco); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.find(m => m.seq === seqRefresco).ignorado === false, 'loy/ignorados: se puede reactivar un producto encontrado con el buscador, igual que antes');
+  await pg.evaluate(() => { S.lvIgnQ = '' }); lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/ignorados \(1\)/i.test(lvh), 'loy/ignorados: al reactivarlo el contador de ignorados baja (ya solo queda BEBIDA MISTERIOSA)');
   await pg.evaluate(() => closeModal());
 
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----

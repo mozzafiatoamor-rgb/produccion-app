@@ -71,7 +71,9 @@ En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparecen tr
   no existe).
 - **Emparejados**: ya tienen un platillo asignado; se pueden pausar (vuelven a "Por emparejar"
   hasta que se reactiven o se re-emparejen).
-- **Ignorados**: nunca generan pendiente; se pueden reactivar en cualquier momento.
+- **Ignorados**: nunca generan pendiente; se pueden reactivar en cualquier momento. Esta lista
+  viene colapsada (solo se ve el total) para no ocupar espacio cuando hay muchos; al desplegarla
+  tiene su propio buscador para encontrar rápido el que quieras reactivar.
 
 Para elegir varios a la vez ya no hace falta guardar uno por uno: se elige platillo (o se marca
 Ignorar) en cuantos productos se quiera y un solo botón "💾 Guardar" manda todos los cambios juntos.
