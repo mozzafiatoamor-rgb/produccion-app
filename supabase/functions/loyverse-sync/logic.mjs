@@ -2,6 +2,12 @@
 // Logica pura (sin red, sin base de datos) de la sincronizacion Loyverse -> inventario.
 // Se prueba con Node (tests/loyverse-sync.test.js) y la usa tal cual la Edge Function en Deno
 // (Deno entiende ES modules igual que Node; este archivo no usa nada especifico de ninguno).
+//
+// Importante: esto NO escribe directo en el inventario. Por cada recibo con al menos un
+// producto mapeado (y no ignorado) arma una fila "pendiente" con las ventas que se
+// aplicarian (platillo vendido + descuento de ingredientes) para que un usuario logueado
+// la revise y la acepte desde la app (Ajustes > Loyverse > pendientes). Solo al aceptarla
+// esas filas se insertan de verdad en `ventas`.
 
 export function norm(s) {
   return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
@@ -30,10 +36,20 @@ function qtyOf(li) {
   return typeof q === 'number' ? q : parseFloat(q) || 0;
 }
 
+// Resumen legible de un recibo, ej: "2x Cheesecake, 1x Café Americano" (solo platillos, no ingredientes).
+function resumenDe(ventasReceipt) {
+  const porProducto = new Map();
+  ventasReceipt.forEach(function (v) {
+    if (v.notas !== '[Loyverse]') return;
+    porProducto.set(v.producto, (porProducto.get(v.producto) || 0) + v.cantidad);
+  });
+  return Array.from(porProducto.entries()).map(function ([p, c]) { return c + 'x ' + p; }).join(', ');
+}
+
 /**
  * @param {object} args
  * @param {Array}  args.receipts       recibos ya ordenados por created_at ascendente
- * @param {Array}  args.mapRows        [{loyverse_item_name, platillo, activo}]
+ * @param {Array}  args.mapRows        [{loyverse_item_name, platillo, activo, ignorado}]
  * @param {Array}  args.recetasRows    [{platillo, categoria, ingrediente, cantidad, unidad}]
  * @param {Array}  args.catalogoRows   [{producto, categoria}]
  * @param {Set}    args.processedSet   receipt_number ya aplicados (de loyverse_processed_receipts)
@@ -43,8 +59,15 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
   processedSet = processedSet || new Set();
   const cursorMs = cursorAfter ? new Date(cursorAfter).getTime() : 0;
 
+  // ignorado=true: el admin ya decidio que este producto de Loyverse no aplica aqui (ej. una
+  // bebida; esta app solo descuenta inventario de comida) -> no se descuenta y tampoco se
+  // vuelve a pedir que lo emparejen. activo=false (pausado) sigue tratandose como "sin mapear".
   const mapByName = new Map();
-  (mapRows || []).forEach(function (m) { if (m.activo !== false) mapByName.set(norm(m.loyverse_item_name), m.platillo); });
+  const ignoradoSet = new Set();
+  (mapRows || []).forEach(function (m) {
+    if (m.ignorado) { ignoradoSet.add(norm(m.loyverse_item_name)); return; }
+    if (m.activo !== false) mapByName.set(norm(m.loyverse_item_name), m.platillo);
+  });
 
   const recetasByPlatillo = new Map();
   (recetasRows || []).forEach(function (r) {
@@ -56,7 +79,7 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
   const catalogoByNorm = new Map();
   (catalogoRows || []).forEach(function (c) { catalogoByNorm.set(norm(c.producto), c); });
 
-  const ventasInserts = [];
+  const pendientes = []; // [{receipt_number, fecha, resumen, ventas:[...]}]
   const seenItemsUpserts = new Map(); // item_name -> {item_name,item_id,inc,ultima_vez,ultimo_recibo}
   const receiptsProcessed = [];
   const omitted = [];
@@ -78,8 +101,8 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
 
     const items = lineItemsOf(r);
     const descuentos = new Map(); // producto normalizado -> {producto,cantidad}
-    const detalles = [];
-    let huboMapeado = false;
+    const ventasReceipt = []; // filas que se propondrian para este recibo (platillo + ingredientes)
+    let dishIdx = 0;
 
     for (const li of items) {
       const nombreLoy = itemNameOf(li);
@@ -88,16 +111,17 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
       const key = norm(nombreLoy);
       const platillo = mapByName.get(key);
       if (!platillo) {
+        if (ignoradoSet.has(key)) continue; // ej. una bebida: no descuenta, no vuelve a aparecer pendiente
         const s = seenItemsUpserts.get(nombreLoy) || { item_name: nombreLoy, item_id: li.item_id || li.variant_id || null, inc: 0, ultima_vez: createdAt || new Date().toISOString(), ultimo_recibo: rn };
         s.inc += 1; s.ultima_vez = createdAt || s.ultima_vez; s.ultimo_recibo = rn;
         seenItemsUpserts.set(nombreLoy, s);
         continue;
       }
       const receta = recetasByPlatillo.get(norm(platillo));
-      huboMapeado = true;
-      detalles.push(qty + 'x ' + platillo);
-      const idBase = 'LOY-' + rn;
-      ventasInserts.push({ id: idBase, fecha: createdAt, categoria: receta ? receta.categoria : '', producto: platillo, cantidad: qty, vendedor: 'Loyverse', notas: '[Loyverse]' });
+      // id unico por linea (D=platillo vendido, I=descuento de ingrediente); antes usaba el mismo
+      // id para todas las filas de platillo de un recibo y una segunda venta mapeada en el mismo
+      // recibo se perdia silenciosamente (on_conflict=id la trataba como duplicado).
+      ventasReceipt.push({ id: 'LOY-' + rn + '-D' + (dishIdx++), fecha: createdAt, categoria: receta ? receta.categoria : '', producto: platillo, cantidad: qty, vendedor: 'Loyverse', notas: '[Loyverse]' });
       if (receta) {
         receta.ingredientes.forEach(function (ing) {
           if (!ing.cantidad || ing.cantidad <= 0) return;
@@ -109,12 +133,13 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
       }
     }
 
-    if (huboMapeado) {
+    if (ventasReceipt.length) {
       let i = 0;
       for (const d of descuentos.values()) {
         const cat = catalogoByNorm.get(norm(d.producto));
-        ventasInserts.push({ id: 'LOY-' + rn + '-' + (i++), fecha: createdAt, categoria: cat ? cat.categoria : '', producto: cat ? cat.producto : d.producto, cantidad: Math.ceil(d.cantidad), vendedor: 'Loyverse', notas: 'Descuento Loyverse' });
+        ventasReceipt.push({ id: 'LOY-' + rn + '-I' + (i++), fecha: createdAt, categoria: cat ? cat.categoria : '', producto: cat ? cat.producto : d.producto, cantidad: Math.ceil(d.cantidad), vendedor: 'Loyverse', notas: 'Descuento Loyverse' });
       }
+      pendientes.push({ receipt_number: rn, fecha: createdAt, resumen: resumenDe(ventasReceipt), ventas: ventasReceipt });
     }
 
     receiptsProcessed.push(rn);
@@ -122,7 +147,7 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
   }
 
   return {
-    ventasInserts,
+    pendientes,
     seenItemsUpserts: Array.from(seenItemsUpserts.values()),
     receiptsProcessed,
     omitted,

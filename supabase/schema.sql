@@ -276,8 +276,9 @@ grant execute on function produccion_app.app_verify_admin(text) to anon;
 create table if not exists produccion_app.loyverse_map (
   seq              bigint generated always as identity primary key,
   loyverse_item_name text not null unique,
-  platillo         text not null,
+  platillo         text, -- NULL cuando ignorado=true (ej. una bebida: no aplica en esta app)
   activo           boolean not null default true,
+  ignorado         boolean not null default false,
   created_at       timestamptz not null default now()
 );
 
@@ -304,6 +305,22 @@ create table if not exists produccion_app.loyverse_processed_receipts (
   processed_at   timestamptz not null default now()
 );
 
+-- Cada recibo con al menos un producto mapeado (y no ignorado) genera una fila aqui con las
+-- ventas que se aplicarian (platillo + descuento de ingredientes). La Edge Function NO escribe
+-- directo en `ventas`: un usuario logueado revisa esto y lo acepta desde la app (como se hacia
+-- a mano al cerrar turno); solo entonces esas filas se insertan de verdad.
+create table if not exists produccion_app.loyverse_pending (
+  seq            bigint generated always as identity primary key,
+  receipt_number text not null unique,
+  fecha          timestamptz not null,
+  resumen        text not null,
+  ventas_payload jsonb not null,
+  estado         text not null default 'pendiente' check (estado in ('pendiente','aceptado','rechazado')),
+  resuelto_por   text,
+  resuelto_at    timestamptz,
+  created_at     timestamptz not null default now()
+);
+
 -- Indice parcial para que la Edge Function pueda insertar las filas de venta
 -- con `on_conflict=id&resolution=ignore-duplicates`: si un reintento vuelve a
 -- mandar el mismo recibo, Postgres ignora la fila repetida en vez de duplicarla.
@@ -314,6 +331,7 @@ alter table produccion_app.loyverse_map               enable row level security;
 alter table produccion_app.loyverse_seen_items         enable row level security;
 alter table produccion_app.loyverse_sync_state         enable row level security;
 alter table produccion_app.loyverse_processed_receipts enable row level security;
+alter table produccion_app.loyverse_pending             enable row level security;
 
 drop policy if exists app_select on produccion_app.loyverse_map;
 create policy app_select on produccion_app.loyverse_map for select to anon using (true);
@@ -328,8 +346,14 @@ create policy app_select on produccion_app.loyverse_seen_items for select to ano
 drop policy if exists app_select on produccion_app.loyverse_sync_state;
 create policy app_select on produccion_app.loyverse_sync_state for select to anon using (true);
 
+drop policy if exists app_select on produccion_app.loyverse_pending;
+create policy app_select on produccion_app.loyverse_pending for select to anon using (true);
+drop policy if exists app_update on produccion_app.loyverse_pending;
+create policy app_update on produccion_app.loyverse_pending for update to anon using (true) with check (true);
+
 grant select, insert, update on produccion_app.loyverse_map to anon;
 grant select on produccion_app.loyverse_seen_items, produccion_app.loyverse_sync_state to anon;
+grant select, update on produccion_app.loyverse_pending to anon;
 grant usage, select on all sequences in schema produccion_app to anon;
 
 -- Ademas de anon (arriba), la Edge Function necesita estos permisos con service_role:
@@ -337,7 +361,8 @@ grant usage, select on all sequences in schema produccion_app to anon;
 -- se ejecuto (no aplica solo a tablas creadas despues), asi que estas 4 tablas nuevas
 -- necesitan su propio grant explicito.
 grant all on produccion_app.loyverse_map, produccion_app.loyverse_seen_items,
-  produccion_app.loyverse_sync_state, produccion_app.loyverse_processed_receipts to service_role;
+  produccion_app.loyverse_sync_state, produccion_app.loyverse_processed_receipts,
+  produccion_app.loyverse_pending to service_role;
 grant usage, select on all sequences in schema produccion_app to service_role;
 
 -- Que PostgREST (la API) vea el esquema/tablas nuevas sin reiniciar

@@ -86,7 +86,7 @@ async function run() {
 
   const receiptNumbers = receipts.map((r: any) => r.receipt_number).filter(Boolean);
   const [mapRows, recetasRows, catalogoRows, processedRows] = await Promise.all([
-    sbGet('loyverse_map?select=loyverse_item_name,platillo,activo'),
+    sbGet('loyverse_map?select=loyverse_item_name,platillo,activo,ignorado'),
     sbGet('recetas?select=platillo,categoria,ingrediente,cantidad&limit=5000'),
     sbGet('catalogo?select=producto,categoria&limit=1000'),
     sbGet('loyverse_processed_receipts?receipt_number=in.(' + receiptNumbers.map((n: string) => '"' + n.replace(/"/g, '') + '"').join(',') + ')&select=receipt_number'),
@@ -98,13 +98,18 @@ async function run() {
   if (DRY_RUN) {
     return {
       modo: 'PRUEBA (no se escribio nada)', recibos: receipts.length,
-      ventasQueSeInsertarian: plan.ventasInserts, productosNoMapeados: plan.seenItemsUpserts,
+      pendientesQueSeCrearian: plan.pendientes, productosNoMapeados: plan.seenItemsUpserts,
       recibosOmitidos: plan.omitted, cursorSiguiente: plan.maxCreatedAt,
     };
   }
 
-  if (plan.ventasInserts.length) {
-    await sbWrite('ventas?on_conflict=id', 'POST', plan.ventasInserts, 'return=minimal,resolution=ignore-duplicates');
+  // No se escribe en `ventas` todavia: se deja como pendiente para que un usuario logueado lo
+  // revise y lo acepte desde la app (Ajustes > Loyverse > pendientes), igual que se hacia a mano
+  // al cerrar turno. on_conflict=receipt_number es defensivo (receiptsProcessed ya evita esto).
+  if (plan.pendientes.length) {
+    await sbWrite('loyverse_pending?on_conflict=receipt_number', 'POST', plan.pendientes.map((p: any) => ({
+      receipt_number: p.receipt_number, fecha: p.fecha, resumen: p.resumen, ventas_payload: p.ventas,
+    })), 'return=minimal,resolution=ignore-duplicates');
   }
   if (plan.seenItemsUpserts.length) {
     const names = plan.seenItemsUpserts.map((s: any) => '"' + s.item_name.replace(/"/g, '') + '"').join(',');
@@ -123,10 +128,10 @@ async function run() {
   await sbWrite('loyverse_sync_state?id=eq.1', 'PATCH', {
     last_created_at: plan.maxCreatedAt || cursor,
     last_run_at: new Date().toISOString(), last_run_ok: true,
-    last_run_detalle: receipts.length + ' recibos, ' + plan.ventasInserts.length + ' filas de venta, ' + plan.seenItemsUpserts.length + ' productos sin mapear, ' + plan.omitted.length + ' omitidos',
+    last_run_detalle: receipts.length + ' recibos, ' + plan.pendientes.length + ' pendientes de aceptar, ' + plan.seenItemsUpserts.length + ' productos sin mapear, ' + plan.omitted.length + ' omitidos',
   }, 'return=minimal');
 
-  return { recibos: receipts.length, ventasInsertadas: plan.ventasInserts.length, sinMapear: plan.seenItemsUpserts.length, omitidos: plan.omitted.length };
+  return { recibos: receipts.length, pendientesCreados: plan.pendientes.length, sinMapear: plan.seenItemsUpserts.length, omitidos: plan.omitted.length };
 }
 
 Deno.serve(async (_req: Request) => {
