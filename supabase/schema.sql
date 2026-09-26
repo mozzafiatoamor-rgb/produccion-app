@@ -332,5 +332,13 @@ grant select, insert, update on produccion_app.loyverse_map to anon;
 grant select on produccion_app.loyverse_seen_items, produccion_app.loyverse_sync_state to anon;
 grant usage, select on all sequences in schema produccion_app to anon;
 
+-- Ademas de anon (arriba), la Edge Function necesita estos permisos con service_role:
+-- el GRANT ALL ... IN SCHEMA de mas arriba en este archivo es una foto del momento en que
+-- se ejecuto (no aplica solo a tablas creadas despues), asi que estas 4 tablas nuevas
+-- necesitan su propio grant explicito.
+grant all on produccion_app.loyverse_map, produccion_app.loyverse_seen_items,
+  produccion_app.loyverse_sync_state, produccion_app.loyverse_processed_receipts to service_role;
+grant usage, select on all sequences in schema produccion_app to service_role;
+
 -- Que PostgREST (la API) vea el esquema/tablas nuevas sin reiniciar
 notify pgrst, 'reload schema';

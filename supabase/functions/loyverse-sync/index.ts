@@ -62,7 +62,21 @@ async function run() {
   if (!LOY_TOKEN) throw new Error('Falta el secreto LOYVERSE_TOKEN (Project Settings > Edge Functions > Secrets)');
 
   const [state] = await sbGet('loyverse_sync_state?id=eq.1&select=last_created_at');
-  const cursor = state ? state.last_created_at : null;
+  let cursor = state ? state.last_created_at : null;
+
+  if (!cursor) {
+    // Primera corrida: todavia no hay cursor guardado. En vez de traer TODO el historico
+    // de Loyverse (que ademas esta limitado a 31 dias sin el addon "Unlimited Sales
+    // History" -> 402 Payment Required), arrancamos el cursor en "ahora": de aqui en
+    // adelante se sincroniza normal, sin importar ventas pasadas ni tocar el inventario
+    // por algo que ya ocurrio antes de activar esto.
+    cursor = new Date().toISOString();
+    await sbWrite('loyverse_sync_state?id=eq.1', 'PATCH', {
+      last_created_at: cursor, last_run_at: new Date().toISOString(), last_run_ok: true,
+      last_run_detalle: 'primera corrida: cursor inicializado en ' + cursor + ' (no se importo historico)',
+    }, 'return=minimal');
+    return { recibos: 0, nota: 'cursor inicializado en ' + cursor + ', no se importo historico' };
+  }
 
   const receipts = await fetchNewReceipts(cursor);
   if (!receipts.length) {
