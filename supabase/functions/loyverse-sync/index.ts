@@ -44,7 +44,7 @@ async function fetchNewReceipts(sinceISO: string | null) {
   let cursor: string | null = null;
   for (;;) {
     const p = new URLSearchParams({ limit: '250' });
-    if (sinceISO) p.set('created_at_min', sinceISO);
+    if (sinceISO) p.set('created_at_min', new Date(sinceISO).toISOString());
     if (cursor) p.set('cursor', cursor);
     const r = await fetch(LOY_BASE + '/receipts?' + p.toString(), { headers: { Authorization: 'Bearer ' + LOY_TOKEN } });
     if (!r.ok) throw new Error('Loyverse GET /receipts -> ' + r.status + ' ' + (await r.text()).slice(0, 300));
