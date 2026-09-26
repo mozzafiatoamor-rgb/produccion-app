@@ -85,20 +85,22 @@ async function run() {
   }
 
   const receiptNumbers = receipts.map((r: any) => r.receipt_number).filter(Boolean);
-  const [mapRows, recetasRows, catalogoRows, processedRows] = await Promise.all([
+  const [mapRows, modifierMapRows, recetasRows, catalogoRows, processedRows] = await Promise.all([
     sbGet('loyverse_map?select=loyverse_item_name,platillo,activo,ignorado'),
+    sbGet('loyverse_modifier_map?select=modifier_option,ingrediente,cantidad,activo,ignorado'),
     sbGet('recetas?select=platillo,categoria,ingrediente,cantidad&limit=5000'),
     sbGet('catalogo?select=producto,categoria&limit=1000'),
     sbGet('loyverse_processed_receipts?receipt_number=in.(' + receiptNumbers.map((n: string) => '"' + n.replace(/"/g, '') + '"').join(',') + ')&select=receipt_number'),
   ]);
   const processedSet = new Set(processedRows.map((r: any) => r.receipt_number));
 
-  const plan = planSync({ receipts, mapRows, recetasRows, catalogoRows, processedSet, cursorAfter: cursor });
+  const plan = planSync({ receipts, mapRows, modifierMapRows, recetasRows, catalogoRows, processedSet, cursorAfter: cursor });
 
   if (DRY_RUN) {
     return {
       modo: 'PRUEBA (no se escribio nada)', recibos: receipts.length,
       pendientesQueSeCrearian: plan.pendientes, productosNoMapeados: plan.seenItemsUpserts,
+      modificadoresNoMapeados: plan.seenModifiersUpserts,
       recibosOmitidos: plan.omitted, cursorSiguiente: plan.maxCreatedAt,
     };
   }
@@ -121,6 +123,16 @@ async function run() {
     }));
     await sbWrite('loyverse_seen_items?on_conflict=item_name', 'POST', filas, 'return=minimal,resolution=merge-duplicates');
   }
+  if (plan.seenModifiersUpserts.length) {
+    const opts = plan.seenModifiersUpserts.map((s: any) => '"' + s.modifier_option.replace(/"/g, '') + '"').join(',');
+    const existentes = await sbGet('loyverse_modifiers_seen?modifier_option=in.(' + opts + ')&select=modifier_option,veces');
+    const vecesPrevias = new Map(existentes.map((e: any) => [e.modifier_option, e.veces]));
+    const filas = plan.seenModifiersUpserts.map((s: any) => ({
+      modifier_option: s.modifier_option, modifier_name: s.modifier_name, ultima_vez: s.ultima_vez, ultimo_recibo: s.ultimo_recibo,
+      veces: (vecesPrevias.get(s.modifier_option) || 0) + s.inc,
+    }));
+    await sbWrite('loyverse_modifiers_seen?on_conflict=modifier_option', 'POST', filas, 'return=minimal,resolution=merge-duplicates');
+  }
   if (plan.receiptsProcessed.length) {
     await sbWrite('loyverse_processed_receipts?on_conflict=receipt_number', 'POST',
       plan.receiptsProcessed.map((n: string) => ({ receipt_number: n })), 'return=minimal,resolution=ignore-duplicates');
@@ -128,10 +140,10 @@ async function run() {
   await sbWrite('loyverse_sync_state?id=eq.1', 'PATCH', {
     last_created_at: plan.maxCreatedAt || cursor,
     last_run_at: new Date().toISOString(), last_run_ok: true,
-    last_run_detalle: receipts.length + ' recibos, ' + plan.pendientes.length + ' pendientes de aceptar, ' + plan.seenItemsUpserts.length + ' productos sin mapear, ' + plan.omitted.length + ' omitidos',
+    last_run_detalle: receipts.length + ' recibos, ' + plan.pendientes.length + ' pendientes de aceptar, ' + plan.seenItemsUpserts.length + ' productos sin mapear, ' + plan.seenModifiersUpserts.length + ' modificadores sin mapear, ' + plan.omitted.length + ' omitidos',
   }, 'return=minimal');
 
-  return { recibos: receipts.length, pendientesCreados: plan.pendientes.length, sinMapear: plan.seenItemsUpserts.length, omitidos: plan.omitted.length };
+  return { recibos: receipts.length, pendientesCreados: plan.pendientes.length, sinMapear: plan.seenItemsUpserts.length, modificadoresSinMapear: plan.seenModifiersUpserts.length, omitidos: plan.omitted.length };
 }
 
 Deno.serve(async (_req: Request) => {

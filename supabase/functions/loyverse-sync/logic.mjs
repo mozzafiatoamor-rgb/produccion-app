@@ -28,6 +28,9 @@ export function receiptIsVoidOrRefund(r) {
 function lineItemsOf(r) {
   return r.line_items || r.lineItems || [];
 }
+function lineModifiersOf(li) {
+  return li.line_modifiers || li.lineModifiers || [];
+}
 function itemNameOf(li) {
   return li.item_name || li.name || li.itemName || '';
 }
@@ -55,7 +58,7 @@ function resumenDe(ventasReceipt) {
  * @param {Set}    args.processedSet   receipt_number ya aplicados (de loyverse_processed_receipts)
  * @param {Date|string|null} args.cursorAfter  no procesar recibos con created_at <= a esto (defensivo; el caller ya filtra en la consulta)
  */
-export function planSync({ receipts, mapRows, recetasRows, catalogoRows, processedSet, cursorAfter }) {
+export function planSync({ receipts, mapRows, recetasRows, catalogoRows, processedSet, cursorAfter, modifierMapRows }) {
   processedSet = processedSet || new Set();
   const cursorMs = cursorAfter ? new Date(cursorAfter).getTime() : 0;
 
@@ -79,8 +82,20 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
   const catalogoByNorm = new Map();
   (catalogoRows || []).forEach(function (c) { catalogoByNorm.set(norm(c.producto), c); });
 
+  // Modificadores (ej. proteina, tipo de pasta): "PST Amatriciana" siempre se llama igual en
+  // Loyverse sin importar que proteina/pasta eligio el cliente -- esa eleccion viaja aparte, en
+  // line_modifiers de cada linea del recibo. Cada OPCION de modificador se mapea una sola vez
+  // (no por platillo) a un ingrediente+cantidad que se suma al descuento de ingredientes normal.
+  const modifierByOption = new Map();
+  const modIgnoradoSet = new Set();
+  (modifierMapRows || []).forEach(function (m) {
+    if (m.ignorado) { modIgnoradoSet.add(norm(m.modifier_option)); return; }
+    if (m.activo !== false) modifierByOption.set(norm(m.modifier_option), { ingrediente: m.ingrediente, cantidad: parseFloat(m.cantidad) || 0 });
+  });
+
   const pendientes = []; // [{receipt_number, fecha, resumen, ventas:[...]}]
   const seenItemsUpserts = new Map(); // item_name -> {item_name,item_id,inc,ultima_vez,ultimo_recibo}
+  const seenModifiersUpserts = new Map(); // modifier_option -> {modifier_option,modifier_name,inc,ultima_vez,ultimo_recibo}
   const receiptsProcessed = [];
   const omitted = [];
   let maxCreatedAt = null;
@@ -131,6 +146,24 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
           descuentos.set(k2, cur);
         });
       }
+      lineModifiersOf(li).forEach(function (mod) {
+        const opt = mod.option || mod.name;
+        if (!opt) return;
+        const mk = norm(opt);
+        if (modIgnoradoSet.has(mk)) return; // ej. "Sin queso": no aplica en esta app, no se vuelve a pedir
+        const modMap = modifierByOption.get(mk);
+        if (!modMap) {
+          const sm = seenModifiersUpserts.get(opt) || { modifier_option: opt, modifier_name: mod.name || null, inc: 0, ultima_vez: createdAt || new Date().toISOString(), ultimo_recibo: rn };
+          sm.inc += 1; sm.ultima_vez = createdAt || sm.ultima_vez; sm.ultimo_recibo = rn;
+          seenModifiersUpserts.set(opt, sm);
+          return;
+        }
+        if (!modMap.ingrediente || !modMap.cantidad) return;
+        const k3 = norm(modMap.ingrediente);
+        const cur3 = descuentos.get(k3) || { producto: modMap.ingrediente, cantidad: 0 };
+        cur3.cantidad += modMap.cantidad * qty;
+        descuentos.set(k3, cur3);
+      });
     }
 
     if (ventasReceipt.length) {
@@ -149,6 +182,7 @@ export function planSync({ receipts, mapRows, recetasRows, catalogoRows, process
   return {
     pendientes,
     seenItemsUpserts: Array.from(seenItemsUpserts.values()),
+    seenModifiersUpserts: Array.from(seenModifiersUpserts.values()),
     receiptsProcessed,
     omitted,
     maxCreatedAt,

@@ -144,6 +144,56 @@ function idsUnicos(ventas) {
   ok(ventas.filter(v => v.notas === '[Loyverse]').length === 1, 'las lineas con cantidad 0 o sin nombre se ignoran');
 }
 
+// ---- 12) modificadores (ej. proteina/tipo de pasta): "PST Amatriciana" siempre se llama igual en
+// Loyverse sin importar la opcion elegida -- esa opcion se mapea aparte, una sola vez, a un
+// ingrediente+cantidad que se suma al descuento normal de la receta.
+const modifierMapRows = [
+  { modifier_option: 'Arrachera', ingrediente: 'Arrachera', cantidad: 0.15, activo: true },
+  { modifier_option: 'Fusilli', ingrediente: 'Pasta fusilli', cantidad: 0.1, activo: true },
+  { modifier_option: 'Sin queso', ingrediente: null, ignorado: true },
+];
+{
+  const r = receipt({ receipt_number: 'R200', line_items: [{ item_name: 'Cheesecake', quantity: 2, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
+  const ventas = plan.pendientes[0].ventas;
+  const arrachera = ventas.find(v => v.producto === 'Arrachera');
+  ok(!!arrachera && arrachera.cantidad === Math.ceil(0.15 * 2), 'modificador mapeado: suma su ingrediente (cantidad x qty vendida, redondeado hacia arriba)');
+  ok(ventas.some(v => v.producto === 'Queso crema'), 'modificador mapeado: no reemplaza los ingredientes normales de la receta, se suman aparte');
+}
+{
+  const r = receipt({ receipt_number: 'R201', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Tipo de pasta', option: 'Espagueti' }] }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
+  ok(plan.pendientes.length === 1, 'modificador sin mapear: el platillo igual genera su pendiente (solo falta el ingrediente del modificador)');
+  ok(plan.seenModifiersUpserts.some(s => s.modifier_option === 'Espagueti'), 'modificador sin mapear: queda pendiente de emparejar (aparte de los productos)');
+}
+{
+  const r = receipt({ receipt_number: 'R202', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Extra', option: 'Sin queso' }] }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
+  ok(!plan.seenModifiersUpserts.some(s => s.modifier_option === 'Sin queso'), 'modificador ignorado: no se vuelve a pedir que se empareje');
+  ok(plan.pendientes[0].ventas.length === 3, 'modificador ignorado: no agrega ninguna fila de ingrediente (1 platillo + 2 ingredientes de la receta nada mas)');
+}
+{
+  const r = receipt({ receipt_number: 'R203', line_items: [{ item_name: 'Producto que no existe', quantity: 1, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
+  ok(!plan.seenModifiersUpserts.length, 'si el platillo mismo no esta mapeado, sus modificadores ni se revisan (se resuelve el platillo primero)');
+}
+{
+  const r = receipt({ receipt_number: 'R204', line_items: [
+    { item_name: 'Cheesecake', quantity: 2, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] },
+    { item_name: 'Café Americano', quantity: 1, line_modifiers: [{ name: 'Tipo de pasta', option: 'Fusilli' }] },
+  ] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
+  const ventas = plan.pendientes[0].ventas;
+  ok(ventas.some(v => v.producto === 'Arrachera') && ventas.some(v => v.producto === 'Pasta fusilli'), 'varias lineas del mismo recibo con distintos modificadores mapeados suman cada ingrediente por separado');
+}
+{
+  const pausedModMap = [{ modifier_option: 'Arrachera', ingrediente: 'Arrachera', cantidad: 0.15, activo: false }];
+  const r = receipt({ receipt_number: 'R205', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows: pausedModMap });
+  ok(!plan.pendientes[0].ventas.some(v => v.producto === 'Arrachera'), 'modificador pausado (activo:false) se trata como sin mapear: no descuenta');
+  ok(plan.seenModifiersUpserts.some(s => s.modifier_option === 'Arrachera'), 'modificador pausado vuelve a aparecer como pendiente de emparejar');
+}
+
 ok(norm('Café Americano') === norm('CAFE   americano'), 'norm() ignora acentos, mayusculas y espacios repetidos, igual que en el resto de la app');
 
 console.log(fails ? '\n' + fails + ' FALLAS' : '\nTODO OK');

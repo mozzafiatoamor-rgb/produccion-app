@@ -321,6 +321,29 @@ create table if not exists produccion_app.loyverse_pending (
   created_at     timestamptz not null default now()
 );
 
+-- Modificadores (ej. proteina, tipo de pasta): un platillo como "PST Amatriciana" siempre se
+-- llama igual en Loyverse sin importar la opcion elegida -- esa opcion viaja aparte, como
+-- "modificador" del recibo. Cada OPCION se mapea una sola vez (no por platillo) a un
+-- ingrediente+cantidad que se suma al descuento normal de la receta.
+create table if not exists produccion_app.loyverse_modifiers_seen (
+  modifier_option text primary key,
+  modifier_name   text,
+  veces           integer not null default 1,
+  ultima_vez      timestamptz not null default now(),
+  ultimo_recibo   text
+);
+
+create table if not exists produccion_app.loyverse_modifier_map (
+  seq             bigint generated always as identity primary key,
+  modifier_option text not null unique,
+  ingrediente     text, -- NULL cuando ignorado=true (ej. "Sin queso": no afecta inventario)
+  cantidad        numeric,
+  unidad          text,
+  activo          boolean not null default true,
+  ignorado        boolean not null default false,
+  created_at      timestamptz not null default now()
+);
+
 -- Indice parcial para que la Edge Function pueda insertar las filas de venta
 -- con `on_conflict=id&resolution=ignore-duplicates`: si un reintento vuelve a
 -- mandar el mismo recibo, Postgres ignora la fila repetida en vez de duplicarla.
@@ -332,6 +355,8 @@ alter table produccion_app.loyverse_seen_items         enable row level security
 alter table produccion_app.loyverse_sync_state         enable row level security;
 alter table produccion_app.loyverse_processed_receipts enable row level security;
 alter table produccion_app.loyverse_pending             enable row level security;
+alter table produccion_app.loyverse_modifiers_seen       enable row level security;
+alter table produccion_app.loyverse_modifier_map         enable row level security;
 
 drop policy if exists app_select on produccion_app.loyverse_map;
 create policy app_select on produccion_app.loyverse_map for select to anon using (true);
@@ -351,9 +376,21 @@ create policy app_select on produccion_app.loyverse_pending for select to anon u
 drop policy if exists app_update on produccion_app.loyverse_pending;
 create policy app_update on produccion_app.loyverse_pending for update to anon using (true) with check (true);
 
+drop policy if exists app_select on produccion_app.loyverse_modifiers_seen;
+create policy app_select on produccion_app.loyverse_modifiers_seen for select to anon using (true);
+
+drop policy if exists app_select on produccion_app.loyverse_modifier_map;
+create policy app_select on produccion_app.loyverse_modifier_map for select to anon using (true);
+drop policy if exists app_insert on produccion_app.loyverse_modifier_map;
+create policy app_insert on produccion_app.loyverse_modifier_map for insert to anon with check (true);
+drop policy if exists app_update on produccion_app.loyverse_modifier_map;
+create policy app_update on produccion_app.loyverse_modifier_map for update to anon using (true) with check (true);
+
 grant select, insert, update on produccion_app.loyverse_map to anon;
 grant select on produccion_app.loyverse_seen_items, produccion_app.loyverse_sync_state to anon;
 grant select, update on produccion_app.loyverse_pending to anon;
+grant select on produccion_app.loyverse_modifiers_seen to anon;
+grant select, insert, update on produccion_app.loyverse_modifier_map to anon;
 grant usage, select on all sequences in schema produccion_app to anon;
 
 -- Ademas de anon (arriba), la Edge Function necesita estos permisos con service_role:
@@ -362,7 +399,8 @@ grant usage, select on all sequences in schema produccion_app to anon;
 -- necesitan su propio grant explicito.
 grant all on produccion_app.loyverse_map, produccion_app.loyverse_seen_items,
   produccion_app.loyverse_sync_state, produccion_app.loyverse_processed_receipts,
-  produccion_app.loyverse_pending to service_role;
+  produccion_app.loyverse_pending, produccion_app.loyverse_modifiers_seen,
+  produccion_app.loyverse_modifier_map to service_role;
 grant usage, select on all sequences in schema produccion_app to service_role;
 
 -- Que PostgREST (la API) vea el esquema/tablas nuevas sin reiniciar
