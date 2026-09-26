@@ -34,17 +34,18 @@ platillo (por ejemplo si empiezas a llevar inventario de esa bebida).
 ## Estado del despliegue
 
 Ya desplegado y validado contra la cuenta real de Loyverse (dry-run, luego real). Falta correr el
-parche 005 (abajo, si no se corrió ya el 004) y redesplegar la función con el código de este
-cambio.
+parche 006 (abajo) y redesplegar la función con el código de este cambio (combinación
+item_name + variante — ver "Variantes de Loyverse" más abajo).
 
-### Aplicar los parches 004 y 005
+### Aplicar el parche 006 (revierte el sistema de modificadores)
 
-En Supabase → SQL Editor, pegar y correr `supabase/patches/004_loyverse_pendientes.sql` (si no se
-corrió antes) y luego `supabase/patches/005_loyverse_modificadores.sql`. El 004 agrega la tabla
-`loyverse_pending`, permite `platillo` en NULL para productos ignorados, y agrega la columna
-`ignorado` a `loyverse_map`. El 005 agrega `loyverse_modifiers_seen` y `loyverse_modifier_map`
-(mapeo de modificadores — ver más abajo). Ambos son idempotentes, igual que los parches
-anteriores.
+Se probó primero un mapeo de "modificadores" aparte (parche `005_loyverse_modificadores.sql`, ya
+corrido contra la base real). Al revisar recibos reales se confirmó que ese no era el mecanismo
+correcto para este negocio (ver "Variantes de Loyverse" más abajo), así que se abandonó. En
+Supabase → SQL Editor, pegar y correr `supabase/patches/006_revertir_modificadores.sql`: borra las
+dos tablas que ya no se usan (`loyverse_modifiers_seen`, `loyverse_modifier_map`). Es idempotente,
+igual que los parches anteriores, y no toca `loyverse_map` ni ninguna otra tabla. (`004` ya se
+había corrido antes; nada que hacer ahí.)
 
 ### Redesplegar la función
 
@@ -72,34 +73,31 @@ En la app: Ajustes → 🔗 Loyverse (solo visible para admin). Ahí aparecen tr
 Para elegir varios a la vez ya no hace falta guardar uno por uno: se elige platillo (o se marca
 Ignorar) en cuantos productos se quiera y un solo botón "💾 Guardar" manda todos los cambios juntos.
 
-## Modificadores (proteína, tipo de pasta, etc.)
+## Variantes de Loyverse (proteína, tipo de pasta, etc.)
 
-**Por qué hace falta esto.** En Loyverse un platillo como "PST Amatriciana" siempre se llama igual
-sin importar qué tipo de pasta o proteína eligió el cliente — esa elección viaja aparte, como
-"modificador" del recibo (por ejemplo grupo "Proteína", opción "Arrachera"). Emparejar el platillo
+**El problema.** En Loyverse un platillo como "PST Amatriciana" siempre se llama igual sin importar
+qué tipo de pasta o proteína eligió el cliente — esa elección viaja aparte, y emparejar el platillo
 con Recetas (arriba) no alcanza para saber qué ingrediente descontar de verdad: sin esto, una
 "PST Amatriciana" con fusilli y una con fettuccine, o con pollo y con arrachera, se verían idénticas
 y solo se descontaría lo que ya trae la receta base del platillo.
 
-**Cómo se resuelve.** En vez de mapear cada combinación de platillo+modificador (que obligaría a
-crear una Receta distinta por cada variedad), cada **opción** de modificador se mapea **una sola
-vez** a un ingrediente + una cantidad, sin importar en qué platillo venga: "Arrachera" siempre
-descuenta lo mismo de arrachera, se haya vendido en la pasta que se haya vendido. Ese descuento se
-**suma** al de la receta del platillo (nunca la reemplaza).
+**Cómo se investigó.** Se probó primero asumiendo que esa elección viajaba como "modificador" del
+recibo (la terminología de Loyverse para eso), y se construyó un mapeo aparte para modificadores
+(parche 005, ya revertido — ver arriba). Al inspeccionar recibos reales directo de la API de
+Loyverse (con un endpoint de diagnóstico temporal en la Edge Function, ya quitado) se confirmó que
+`line_modifiers` viene **vacío en todos los recibos** de este negocio. Lo que sí trae la
+información completa es el campo **`variant_name`** de cada línea (ej. "Fetuccini / Pollo",
+"Mar y tierra"): Loyverse usa **Variantes de producto**, no Modificadores, para este catálogo — se
+puede confirmar en la propia app de Loyverse, en Reportes → Ventas por artículo (el nombre común
+arriba, sus variantes desglosadas debajo).
 
-En la misma pantalla de Ajustes → 🔗 Loyverse, debajo del mapeo de productos, hay una sección
-"🧂 Modificadores" con las mismas tres listas y el mismo flujo:
-
-- **Por emparejar**: opciones de modificador que ya se vendieron y no tienen decisión. Por cada una
-  se elige el ingrediente (de los mismos que usas en Recetas) y la cantidad que descuenta cada vez
-  que se vende, o se marca **Ignorar** si no afecta inventario (ej. "Sin queso", "Extra picante").
-  Igual que con productos, se pueden elegir varias a la vez y guardar todo junto con un botón.
-- **Emparejados**: ya tienen ingrediente + cantidad asignados; se pueden pausar/reactivar.
-- **Ignorados**: nunca descuentan nada; se pueden reactivar en cualquier momento.
-
-Un modificador sin mapear **no bloquea** la venta pendiente del platillo — simplemente ese
-descuento en particular no se aplica todavía hasta que lo mapees, y queda registrado en "Por
-emparejar" para que lo veas.
+**Cómo se resuelve.** No hace falta ninguna pantalla ni tabla nueva. La sincronización combina
+`item_name + variant_name` en un solo nombre (ej. "PST ALFREDO - Fetuccini / Pollo") **antes** de
+guardarlo como producto vendido, y esa combinación se empareja con Recetas exactamente igual que
+cualquier otro producto, en la misma pantalla "Por emparejar" de siempre: cada combinación
+pasta+proteína que ya tengas como Receta separada (ej. "Alfredo Fettuccini Pollo") se mapea una vez
+a su nombre completo de Loyverse. Un producto sin variantes (`variant_name` vacío) sigue
+apareciendo con solo su `item_name`, como siempre.
 
 ## Aceptar/rechazar ventas pendientes
 
@@ -118,9 +116,13 @@ sucursal en Loyverse, hay que revisar si la función necesita filtrar por `store
 ## Pruebas
 
 - `node tests/loyverse-sync.test.js` — lógica pura (mapeo, ignorado, redondeo, reembolsos,
-  reintentos, cursor, colisión de ids, modificadores mapeados/sin mapear/ignorados/pausados y su
-  suma con la receta, etc.), no necesita Deno ni red.
-- `node tests/backends.test.js` (Playwright) — cubre el panel de emparejar/ignorar de productos y
-  de modificadores (solo admin), el mapeo masivo de ambos (elegir varios y guardar todo junto), y
-  la pantalla de aceptar/rechazar ventas pendientes (cualquier usuario logueado), incluyendo el
-  banner de Inicio, la agregación de totales y que aceptar/rechazar escriban lo correcto.
+  reintentos, cursor, colisión de ids, variantes: dos variantes del mismo `item_name` no se
+  confunden entre sí, producto sin variante sigue funcionando solo con `item_name`, dos líneas de
+  un mismo recibo con variantes distintas registran dos vendidos separados, etc.), no necesita Deno
+  ni red.
+- `node tests/backends.test.js` (Playwright) — cubre el panel de emparejar/ignorar de productos
+  (solo admin) y el mapeo masivo (elegir varios y guardar todo junto), incluyendo dos variantes del
+  mismo producto base apareciendo como filas separadas con su nombre completo y emparejándose cada
+  una a su receta exacta, y la pantalla de aceptar/rechazar ventas pendientes (cualquier usuario
+  logueado), incluyendo el banner de Inicio, la agregación de totales y que aceptar/rechazar
+  escriban lo correcto.

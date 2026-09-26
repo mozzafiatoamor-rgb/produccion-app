@@ -23,15 +23,15 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
 - **Mapeo masivo**: en "Por emparejar" ya no hay que guardar producto por producto — se elige
   platillo (o se marca Ignorar) en varios productos a la vez y un solo botón "💾 Guardar" manda
   todos los cambios juntos en una sola petición.
-- **Modificadores (proteína, tipo de pasta, etc.)**: un platillo como "PST Amatriciana" siempre se
-  llama igual en Loyverse aunque cambie la proteína o el tipo de pasta — esa elección viaja aparte,
-  como "modificador" del recibo, y emparejar el platillo con Recetas no alcanzaba para saber qué
-  ingrediente descontar de verdad. Ahora cada **opción** de modificador (ej. "Arrachera", "Fusilli")
-  se mapea **una sola vez** a un ingrediente + cantidad (independiente del platillo al que venga
-  pegada) en la nueva sección "🧂 Modificadores" del mismo panel de Loyverse; ese descuento se suma
-  al de la receta del platillo. Mismo patrón que el mapeo de productos: aparecen solos la primera
-  vez que se venden, se pueden ignorar (ej. "Sin queso": no afecta inventario), pausar/reactivar, y
-  se guardan varios a la vez con un solo botón.
+- **Variantes de Loyverse (proteína, tipo de pasta, etc.)**: un platillo como "PST Amatriciana"
+  siempre se llama igual en Loyverse aunque cambie la proteína o el tipo de pasta — esa elección
+  viaja en el campo **variante** del producto (`variant_name`, ej. "Fetuccini / Pollo"), no en un
+  "modificador" (se probó primero un mapeo de modificadores aparte, pero al revisar recibos reales
+  se confirmó que `line_modifiers` siempre viene vacío para este negocio; ver `docs/LOYVERSE.md`).
+  Por eso ahora la sincronización combina `item_name + variant_name` en un solo nombre (ej. "PST
+  ALFREDO - Fetuccini / Pollo") **antes** de guardarlo, y cada combinación se empareja con Recetas
+  igual que cualquier otro producto, reutilizando el mismo "Por emparejar" — sin pantalla ni tabla
+  nueva.
 - **Pantalla de ventas pendientes** (banner en Inicio, visible para cualquier usuario logueado):
   muestra el total agregado por platillo vendido y por ingrediente a descontar entre los recibos
   seleccionados (todos por defecto, con casilla para incluir/excluir alguno), y botones
@@ -42,22 +42,22 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   (solo para los ids sintéticos `LOY-*`, no afecta los ids normales); cada fila de un recibo
   (platillo o ingrediente) tiene su propio id, así que un recibo con dos platillos distintos ya no
   pierde silenciosamente una de las ventas.
-- `supabase/patches/003_loyverse.sql` + `004_loyverse_pendientes.sql` + `005_loyverse_modificadores.sql`
-  (y `schema.sql`): tablas `loyverse_map`, `loyverse_seen_items`, `loyverse_sync_state`,
-  `loyverse_processed_receipts`, `loyverse_pending`, `loyverse_modifiers_seen`,
-  `loyverse_modifier_map`; `loyverse_map.platillo` admite NULL (productos ignorados); RLS y
-  permisos para `anon` (leer/administrar ambos mapeos y aceptar/rechazar pendientes desde el
-  navegador; el resto solo lectura, lo escribe la Edge Function con la llave de servicio). **Hay
-  que ejecutar los tres parches en el SQL Editor antes de publicar** (003 y 004 ya se corrieron;
-  falta 005).
+- `supabase/patches/003_loyverse.sql` + `004_loyverse_pendientes.sql` (y `schema.sql`): tablas
+  `loyverse_map`, `loyverse_seen_items`, `loyverse_sync_state`, `loyverse_processed_receipts`,
+  `loyverse_pending`; `loyverse_map.platillo` admite NULL (productos ignorados); RLS y permisos
+  para `anon` (leer/administrar el mapeo y aceptar/rechazar pendientes desde el navegador; el
+  resto solo lectura, lo escribe la Edge Function con la llave de servicio). El parche
+  `005_loyverse_modificadores.sql` (sistema de modificadores, abandonado — ver arriba) ya se había
+  corrido contra la base real; `006_revertir_modificadores.sql` lo deshace (`drop table` de las
+  dos tablas que ya no se usan). **Hay que ejecutar 006 en el SQL Editor** (003 y 004 ya se
+  corrieron).
 - `supabase/functions/loyverse-sync/`: `logic.mjs` (lógica pura, sin red — probada con Node) +
   `index.ts` (Edge Function Deno: llama a la API de Loyverse, llama a `logic.mjs`, arma los
-  pendientes en Supabase). Ahora también lee `line_modifiers` de cada recibo y, si la opción
-  elegida (ej. "Arrachera") ya está mapeada, suma su ingrediente+cantidad al descuento del
-  platillo; si no está mapeada, la registra en `loyverse_modifiers_seen` sin bloquear la venta
-  pendiente del platillo. **Ya desplegada y validada contra la cuenta real de Loyverse**
-  (dry-run primero, luego real); falta redesplegar con el código de este cambio (incluye los
-  modificadores).
+  pendientes en Supabase; también con manejo de errores más claro en las llamadas a Loyverse y a
+  Supabase — si un `fetch` responde con el cuerpo vacío o algo que no es JSON, ahora se ve
+  exactamente qué llamada falló en vez de "Unexpected end of JSON input"). **Ya desplegada y
+  validada contra la cuenta real de Loyverse** (dry-run primero, luego real); falta redesplegar con
+  el código de este cambio (combinación item_name + variant_name).
 - Tres corridas contra datos reales (no detectables con datos sintéticos) encontradas y
   corregidas: falta de permisos de `service_role` sobre las tablas nuevas (el `grant` de
   `schema.sql` es una foto del momento en que corre, no cubre tablas creadas después por un
@@ -65,19 +65,21 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   completo de Loyverse y tronaba con 402 (plan sin "Unlimited Sales History") — ahora la primera
   corrida solo inicializa el cursor, sin importar ventas previas a la activación; formato de fecha
   (Postgres manda `+00:00`, Loyverse exige `Z`) — se normaliza antes de mandarlo.
-- Pruebas: `tests/loyverse-sync.test.js` (36 → 49 comprobaciones de la lógica pura: mapeo,
-  ignorado, suma de ingredientes compartidos antes de redondear, productos sin mapear, mapeo
-  pausado, reembolsos/cancelaciones, reintentos, cursor por fecha, ids únicos por fila, cantidades
-  como texto o en 0, y ahora modificadores: se suman al descuento de la receta, sin mapear no
-  bloquean la venta, ignorado no descuenta ni queda pendiente, pausado vuelve a quedar pendiente).
-  `tests/backends.test.js` (Playwright): panel de emparejar/ignorar (solo admin), mapeo masivo de
-  productos y de modificadores (elegir varios y guardar todo junto en un solo POST, upsert sin
-  duplicar), y pantalla de aceptar/rechazar ventas pendientes (cualquier usuario logueado): banner
-  de Inicio, agregación de totales, aceptar inserta las ventas y marca `aceptado`, rechazar no toca
+- Pruebas: `tests/loyverse-sync.test.js` (comprobaciones de la lógica pura: mapeo, ignorado, suma
+  de ingredientes compartidos antes de redondear, productos sin mapear, mapeo pausado,
+  reembolsos/cancelaciones, reintentos, cursor por fecha, ids únicos por fila, cantidades como
+  texto o en 0, y variantes: dos variantes del mismo `item_name` no se confunden entre sí, un
+  producto sin variante sigue funcionando con solo su `item_name`, dos líneas de un mismo recibo
+  con distinta variante registran dos vendidos separados). `tests/backends.test.js` (Playwright):
+  panel de emparejar/ignorar (solo admin), mapeo masivo de productos (elegir varios y guardar todo
+  junto en un solo POST, upsert sin duplicar) incluyendo variantes del mismo producto base
+  (aparecen como filas separadas con su nombre completo y se emparejan cada una a su receta
+  exacta), y pantalla de aceptar/rechazar ventas pendientes (cualquier usuario logueado): banner de
+  Inicio, agregación de totales, aceptar inserta las ventas y marca `aceptado`, rechazar no toca
   `ventas`.
-- Falta: correr el parche 005 y redesplegar la función — ver `docs/LOYVERSE.md`. `main` no se toca
-  hasta probar el nuevo flujo de aceptación (y el mapeo de modificadores) con datos reales y tu
-  aprobación.
+- Falta: correr el parche 006 (opcional, limpia las tablas de modificadores ya creadas) y
+  redesplegar la función — ver `docs/LOYVERSE.md`. `main` no se toca hasta probar el nuevo flujo de
+  aceptación (y el emparejado por variante) con datos reales y tu aprobación.
 
 ## [Sin publicar] — rama `feat/rediseno-azul`
 
