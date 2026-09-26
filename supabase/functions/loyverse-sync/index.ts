@@ -28,15 +28,19 @@ function sbHeaders(extra?: Record<string, string>) {
 }
 async function sbGet(path: string) {
   const r = await fetch(SB_URL + '/rest/v1/' + path, { headers: sbHeaders() });
-  if (!r.ok) throw new Error('Supabase GET ' + path + ' -> ' + r.status + ' ' + (await r.text()).slice(0, 300));
-  return await r.json();
+  const txt = await r.text();
+  if (!r.ok) throw new Error('Supabase GET ' + path + ' -> ' + r.status + ' ' + txt.slice(0, 300));
+  if (!txt) throw new Error('Supabase GET ' + path + ' -> ' + r.status + ' respuesta vacia (sin cuerpo)');
+  try { return JSON.parse(txt); } catch (_e) { throw new Error('Supabase GET ' + path + ' -> ' + r.status + ' respuesta no-JSON: ' + txt.slice(0, 300)); }
 }
 async function sbWrite(path: string, method: string, body: unknown, prefer: string) {
   const r = await fetch(SB_URL + '/rest/v1/' + path, {
     method, headers: sbHeaders({ Prefer: prefer }), body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error('Supabase ' + method + ' ' + path + ' -> ' + r.status + ' ' + (await r.text()).slice(0, 300));
-  return r.status === 204 || r.status === 201 ? null : await r.json();
+  const txt = await r.text();
+  if (!r.ok) throw new Error('Supabase ' + method + ' ' + path + ' -> ' + r.status + ' ' + txt.slice(0, 300));
+  if (!txt) return null;
+  try { return JSON.parse(txt); } catch (_e) { throw new Error('Supabase ' + method + ' ' + path + ' -> ' + r.status + ' respuesta no-JSON: ' + txt.slice(0, 300)); }
 }
 
 async function fetchNewReceipts(sinceISO: string | null) {
@@ -47,8 +51,11 @@ async function fetchNewReceipts(sinceISO: string | null) {
     if (sinceISO) p.set('created_at_min', new Date(sinceISO).toISOString());
     if (cursor) p.set('cursor', cursor);
     const r = await fetch(LOY_BASE + '/receipts?' + p.toString(), { headers: { Authorization: 'Bearer ' + LOY_TOKEN } });
-    if (!r.ok) throw new Error('Loyverse GET /receipts -> ' + r.status + ' ' + (await r.text()).slice(0, 300));
-    const j = await r.json();
+    const txt = await r.text();
+    if (!r.ok) throw new Error('Loyverse GET /receipts -> ' + r.status + ' ' + txt.slice(0, 300));
+    if (!txt) throw new Error('Loyverse GET /receipts -> ' + r.status + ' respuesta vacia (sin cuerpo) -- posible corte de red o limite de la API');
+    let j: any;
+    try { j = JSON.parse(txt); } catch (_e) { throw new Error('Loyverse GET /receipts -> ' + r.status + ' respuesta no-JSON: ' + txt.slice(0, 300)); }
     const receipts = j.receipts || j.data || (Array.isArray(j) ? j : []);
     out.push(...receipts);
     cursor = j.cursor || null;
@@ -90,7 +97,9 @@ async function run() {
     sbGet('loyverse_modifier_map?select=modifier_option,ingrediente,cantidad,activo,ignorado'),
     sbGet('recetas?select=platillo,categoria,ingrediente,cantidad&limit=5000'),
     sbGet('catalogo?select=producto,categoria&limit=1000'),
-    sbGet('loyverse_processed_receipts?receipt_number=in.(' + receiptNumbers.map((n: string) => '"' + n.replace(/"/g, '') + '"').join(',') + ')&select=receipt_number'),
+    receiptNumbers.length
+      ? sbGet('loyverse_processed_receipts?receipt_number=in.(' + receiptNumbers.map((n: string) => '"' + n.replace(/"/g, '') + '"').join(',') + ')&select=receipt_number')
+      : Promise.resolve([]),
   ]);
   const processedSet = new Set(processedRows.map((r: any) => r.receipt_number));
 
