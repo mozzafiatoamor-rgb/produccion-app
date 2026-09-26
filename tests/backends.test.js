@@ -263,50 +263,32 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(lvh.includes('No hay productos de Loyverse pendientes de emparejar'), 'loy/batch: tras guardar ya no queda nada en "Por emparejar"');
   ok(/emparejados \(3\)/i.test(lvh) && /ignorados \(1\)/i.test(lvh), 'loy/batch: los productos guardados pasan a "Emparejados" o "Ignorados" segun lo elegido');
 
-  // ---- modificadores (proteina, tipo de pasta): se mapean UNA vez, no por platillo ----
-  await pg.evaluate(async () => { await Sheets.append('\u{1F37D}️ Recetas', ['Flan', 'Postres', 'Arrachera', 1, 'kg']); await Sheets.append('\u{1F37D}️ Recetas', ['Flan', 'Postres', 'Pasta fusilli', 1, 'kg']); await Sheets.loadAll(); });
-  tbl('loyverse_modifiers_seen').push({ modifier_option: 'Arrachera', modifier_name: 'Proteina', veces: 3, ultima_vez: '2026-09-24T12:00:00Z' });
-  tbl('loyverse_modifiers_seen').push({ modifier_option: 'Fusilli', modifier_name: 'Tipo de pasta', veces: 2, ultima_vez: '2026-09-24T12:10:00Z' });
-  tbl('loyverse_modifiers_seen').push({ modifier_option: 'Sin queso', modifier_name: 'Toppings', veces: 1, ultima_vez: '2026-09-24T12:20:00Z' });
+  // ---- variantes de Loyverse (ej. tipo de pasta / proteina): Loyverse las manda en variant_name, no en modificadores
+  // (line_modifiers siempre viene vacio para este negocio, confirmado con recibos reales). El backend ya combina
+  // item_name + variant_name en un solo nombre (ej. "PST ALFREDO - Fetuccini / Pollo") antes de guardarlo en
+  // loyverse_seen_items, asi que cada combinacion se empareja con Recetas igual que cualquier otro producto, sin
+  // pantalla ni tablas nuevas: reutiliza el mismo "Por emparejar" de siempre ----
+  await pg.evaluate(async () => { await Sheets.append('\u{1F37D}️ Recetas', ['Alfredo Fettuccini Pollo', 'Pastas', 'Salsa alfredo', 0.2, 'kg']); await Sheets.append('\u{1F37D}️ Recetas', ['Alfredo Fettuccini Pollo', 'Pastas', 'Pechuga de pollo', 0.15, 'kg']); await Sheets.append('\u{1F37D}️ Recetas', ['Alfredo Linguini Camaron', 'Pastas', 'Salsa alfredo', 0.2, 'kg']); await Sheets.append('\u{1F37D}️ Recetas', ['Alfredo Linguini Camaron', 'Pastas', 'Camaron', 0.12, 'kg']); await Sheets.loadAll(); });
+  tbl('loyverse_seen_items').push({ item_name: 'PST ALFREDO - Fetuccini / Pollo', item_id: 'LV10', veces: 6, ultima_vez: '2026-09-25T10:00:00Z' });
+  tbl('loyverse_seen_items').push({ item_name: 'PST ALFREDO - Linguini / Camaron', item_id: 'LV11', veces: 2, ultima_vez: '2026-09-25T10:10:00Z' });
+  tbl('loyverse_seen_items').push({ item_name: 'CHAPATA - Mar y tierra', item_id: 'LV12', veces: 4, ultima_vez: '2026-09-25T10:20:00Z' });
   await pg.evaluate(async () => { await lvLoad(); lvRefresh() }); await pg.waitForTimeout(150);
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
-  let modh = lvh.slice(lvh.search(/modificadores/i));
-  ok(/por emparejar \(3\)/i.test(modh) && modh.includes('Arrachera') && modh.includes('Fusilli') && modh.includes('Sin queso'), 'loy/mod: los modificadores vendidos y sin mapear aparecen en su propia seccion "Por emparejar"');
-  ok(modh.includes('Vendido 3 veces') && modh.includes('Proteina'), 'loy/mod: muestra cuantas veces se vendio y el grupo del modificador (ej. "Proteina")');
-  ok(await pg.evaluate(() => { const s = document.getElementById('lvModSel_' + lvSlug('Arrachera')); return !!s && [...s.options].some(o => o.value === 'Arrachera') }), 'loy/mod: el selector de ingrediente se llena con los ingredientes de Recetas');
-  await pg.evaluate(() => { lvModSelSet('Arrachera', 'ingrediente', 'Arrachera'); lvModSelSet('Arrachera', 'cantidad', '0.15'); lvModSelSet('Sin queso', 'ignorar', true) });
+  ok(lvh.includes('PST ALFREDO - Fetuccini / Pollo') && lvh.includes('PST ALFREDO - Linguini / Camaron'), 'loy/variante: dos variantes del mismo producto base de Loyverse (mismo item_name) aparecen como dos filas separadas por emparejar, cada una con su nombre completo item_name + variante');
+  ok(await pg.evaluate(() => { const s = document.getElementById('lvSel_' + lvSlug('PST ALFREDO - Fetuccini / Pollo')); return !!s && [...s.options].some(o => o.value === 'Alfredo Fettuccini Pollo') }), 'loy/variante: el selector de platillo permite elegir la receta exacta de esa combinacion (pasta+proteina)');
+  await pg.evaluate(() => { document.getElementById('lvSel_' + lvSlug('PST ALFREDO - Fetuccini / Pollo')).value = 'Alfredo Fettuccini Pollo'; });
+  await pg.evaluate(async () => { await lvSaveMap('PST ALFREDO - Fetuccini / Pollo') }); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'PST ALFREDO - Fetuccini / Pollo' && m.platillo === 'Alfredo Fettuccini Pollo'), 'loy/variante: emparejar una combinacion especifica crea su propia fila en loyverse_map con el nombre completo item+variante');
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
-  ok(/Guardar \(2\)/.test(lvh), 'loy/mod: elegir ingrediente+cantidad o marcar Ignorar en varios modificadores junta un contador de cambios, sin guardar nada todavia');
-  ok(!(DBM.loyverse_modifier_map || []).length, 'loy/mod: elegir opciones en pantalla todavia no manda nada al servidor');
-  ok(await pg.evaluate(() => document.getElementById('lvModSel_' + lvSlug('Sin queso')).disabled === true), 'loy/mod: marcar Ignorar deshabilita el selector de ingrediente de ese modificador');
-  const postsBeforeMod = log.filter(l => l.startsWith('POST loyverse_modifier_map')).length;
-  await pg.evaluate(async () => { await lvModGuardarCambios() }); await pg.waitForTimeout(250);
-  ok(log.filter(l => l.startsWith('POST loyverse_modifier_map')).length === postsBeforeMod + 1, 'loy/mod: "Guardar" manda un solo POST con todos los cambios de modificadores juntos');
-  ok(DBM.loyverse_modifier_map.length === 2, 'loy/mod: crea filas solo para los modificadores que de verdad se guardaron (Fusilli se queda pendiente)');
-  ok(DBM.loyverse_modifier_map.some(m => m.modifier_option === 'Arrachera' && m.ingrediente === 'Arrachera' && m.cantidad === 0.15 && m.ignorado === false), 'loy/mod: mapea un modificador a ingrediente+cantidad (independiente del platillo)');
-  ok(DBM.loyverse_modifier_map.some(m => m.modifier_option === 'Sin queso' && m.ignorado === true && m.ingrediente === null), 'loy/mod: ignorar un modificador guarda ingrediente=null e ignorado=true');
-  ok(DBM.bitacora.some(b => /Loyverse modificadores mapeo masivo/.test(JSON.stringify(b))), 'loy/mod: el guardado masivo de modificadores queda como una sola entrada en la bitacora');
+  ok(/por emparejar[\s\S]*PST ALFREDO - Linguini \/ Camaron/i.test(lvh), 'loy/variante: emparejar una variante no resuelve la otra variante del mismo producto (siguen siendo productos distintos para el sistema)');
+  await pg.evaluate(() => { document.getElementById('lvSel_' + lvSlug('PST ALFREDO - Linguini / Camaron')).value = 'Alfredo Linguini Camaron'; });
+  await pg.evaluate(async () => { await lvSaveMap('PST ALFREDO - Linguini / Camaron') }); await pg.waitForTimeout(200);
+  ok(DBM.loyverse_map.some(m => m.loyverse_item_name === 'PST ALFREDO - Linguini / Camaron' && m.platillo === 'Alfredo Linguini Camaron'), 'loy/variante: la segunda variante se mapea a su propia receta exacta, independiente de la primera');
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
-  modh = lvh.slice(lvh.search(/modificadores/i));
-  ok(!/Guardar \(/.test(modh), 'loy/mod: tras guardar se limpia la seleccion pendiente de modificadores');
-  ok(/por emparejar \(1\)/i.test(modh) && /por emparejar[\s\S]*Fusilli/i.test(modh), 'loy/mod: el modificador sin mapear (Fusilli) sigue pendiente tras guardar los otros dos');
-  ok(!/por emparejar[\s\S]*Vendido 3 veces/i.test(modh) && !/por emparejar[\s\S]*Vendido 1 vez\b/i.test(modh), 'loy/mod: los ya resueltos no se quedan tambien en "Por emparejar"');
-  ok(/Emparejados \(1\)/i.test(modh) && /Ignorados \(1\)/i.test(modh), 'loy/mod: los modificadores guardados pasan a "Emparejados" o "Ignorados" segun lo elegido');
-  const seqMod = DBM.loyverse_modifier_map.find(m => m.modifier_option === 'Arrachera').seq;
-  await pg.evaluate(async (seq) => { await lvModToggle(seq) }, seqMod); await pg.waitForTimeout(200);
-  ok(DBM.loyverse_modifier_map.find(m => m.seq === seqMod).activo === false, 'loy/mod: pausar un modificador mapeado hace PATCH activo=false');
-  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
-  modh = lvh.slice(lvh.search(/modificadores/i));
-  ok(/Pausados \(1\)/i.test(modh) && modh.includes('Arrachera') && /Por emparejar \(2\)/i.test(modh), 'loy/mod: un mapeo de modificador pausado vuelve a aparecer como pendiente (no se descuenta hasta reactivarlo)');
-  await pg.evaluate(async (seq) => { await lvModToggle(seq) }, seqMod); await pg.waitForTimeout(200);
-  ok(DBM.loyverse_modifier_map.find(m => m.seq === seqMod).activo === true, 'loy/mod: reactivar un modificador pausado hace PATCH activo=true');
-  const seqIgnMod = DBM.loyverse_modifier_map.find(m => m.modifier_option === 'Sin queso').seq;
-  await pg.evaluate(async (seq) => { await lvModReactivarIgnorado(seq) }, seqIgnMod); await pg.waitForTimeout(200);
-  ok(DBM.loyverse_modifier_map.find(m => m.seq === seqIgnMod).ignorado === false, 'loy/mod: reactivar un modificador ignorado hace PATCH ignorado=false');
-  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
-  modh = lvh.slice(lvh.search(/modificadores/i));
-  ok(/Por emparejar \(2\)/i.test(modh) && /por emparejar[\s\S]*Sin queso/i.test(modh), 'loy/mod: al reactivar un ignorado vuelve a "Por emparejar" para darle ingrediente y cantidad (ya no queda solo ignorado, y Fusilli sigue pendiente tambien)');
+  ok(/emparejados[\s\S]*PST ALFREDO - Fetuccini \/ Pollo/i.test(lvh) && /emparejados[\s\S]*PST ALFREDO - Linguini \/ Camaron/i.test(lvh), 'loy/variante: ambas combinaciones quedan emparejadas por separado, cada una a su receta exacta');
+  ok(/por emparejar[\s\S]*CHAPATA - Mar y tierra/i.test(lvh), 'loy/variante: un producto+variante sin receta cargada todavia sigue pendiente, mostrando su nombre completo item_name + variante (no solo "CHAPATA")');
   await pg.evaluate(() => closeModal());
+
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
   tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-1', fecha: '2026-09-24T12:00:00Z', resumen: '2x Flan', ventas_payload: [{ id: 'LOY-R-1-D0', fecha: '2026-09-24T12:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 2, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-1-I0', fecha: '2026-09-24T12:00:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 4, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
   tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-2', fecha: '2026-09-24T12:05:00Z', resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-2-D0', fecha: '2026-09-24T12:05:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-2-I0', fecha: '2026-09-24T12:05:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 2, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });

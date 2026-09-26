@@ -144,54 +144,44 @@ function idsUnicos(ventas) {
   ok(ventas.filter(v => v.notas === '[Loyverse]').length === 1, 'las lineas con cantidad 0 o sin nombre se ignoran');
 }
 
-// ---- 12) modificadores (ej. proteina/tipo de pasta): "PST Amatriciana" siempre se llama igual en
-// Loyverse sin importar la opcion elegida -- esa opcion se mapea aparte, una sola vez, a un
-// ingrediente+cantidad que se suma al descuento normal de la receta.
-const modifierMapRows = [
-  { modifier_option: 'Arrachera', ingrediente: 'Arrachera', cantidad: 0.15, activo: true },
-  { modifier_option: 'Fusilli', ingrediente: 'Pasta fusilli', cantidad: 0.1, activo: true },
-  { modifier_option: 'Sin queso', ingrediente: null, ignorado: true },
+// ---- 12) variantes (ej. proteina/tipo de pasta): "PST ALFREDO" siempre se llama igual en
+// Loyverse sin importar que eligio el cliente -- esa eleccion viaja en variant_name (confirmado
+// con recibos reales, ver docs/LOYVERSE.md), NO en line_modifiers. Cada combinacion item+variante
+// se mapea como un producto mas, igual que cualquier otro (item_name + " - " + variant_name).
+const variantMapRows = [
+  { loyverse_item_name: 'PST ALFREDO - Fetuccini / Pollo', platillo: 'Alfredo Fettuccini Pollo', activo: true },
+];
+const variantRecetasRows = [
+  { platillo: 'Alfredo Fettuccini Pollo', categoria: 'Pastas', ingrediente: 'Salsa alfredo', cantidad: 0.2 },
+  { platillo: 'Alfredo Fettuccini Pollo', categoria: 'Pastas', ingrediente: 'Pechuga de pollo', cantidad: 0.15 },
 ];
 {
-  const r = receipt({ receipt_number: 'R200', line_items: [{ item_name: 'Cheesecake', quantity: 2, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
-  const ventas = plan.pendientes[0].ventas;
-  const arrachera = ventas.find(v => v.producto === 'Arrachera');
-  ok(!!arrachera && arrachera.cantidad === Math.ceil(0.15 * 2), 'modificador mapeado: suma su ingrediente (cantidad x qty vendida, redondeado hacia arriba)');
-  ok(ventas.some(v => v.producto === 'Queso crema'), 'modificador mapeado: no reemplaza los ingredientes normales de la receta, se suman aparte');
+  const r = receipt({ receipt_number: 'R200', line_items: [{ item_name: 'PST ALFREDO', variant_name: 'Fetuccini / Pollo', quantity: 2 }] });
+  const plan = planSync({ receipts: [r], mapRows: variantMapRows, recetasRows: variantRecetasRows, catalogoRows, processedSet: new Set() });
+  ok(plan.pendientes.length === 1 && plan.pendientes[0].ventas.some(v => v.producto === 'Alfredo Fettuccini Pollo'), 'variante mapeada (item_name + variant_name juntos): genera su pendiente con el platillo exacto');
+  ok(plan.pendientes[0].ventas.some(v => v.producto === 'Salsa alfredo') && plan.pendientes[0].ventas.some(v => v.producto === 'Pechuga de pollo'), 'variante mapeada: descuenta los ingredientes de la receta exacta de esa combinacion');
 }
 {
-  const r = receipt({ receipt_number: 'R201', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Tipo de pasta', option: 'Espagueti' }] }] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
-  ok(plan.pendientes.length === 1, 'modificador sin mapear: el platillo igual genera su pendiente (solo falta el ingrediente del modificador)');
-  ok(plan.seenModifiersUpserts.some(s => s.modifier_option === 'Espagueti'), 'modificador sin mapear: queda pendiente de emparejar (aparte de los productos)');
+  // misma comida (item_name), OTRA variante no mapeada -> no se confunde con la de arriba
+  const r = receipt({ receipt_number: 'R201', line_items: [{ item_name: 'PST ALFREDO', variant_name: 'Fusilli / Arrachera', quantity: 1 }] });
+  const plan = planSync({ receipts: [r], mapRows: variantMapRows, recetasRows: variantRecetasRows, catalogoRows, processedSet: new Set() });
+  ok(!plan.pendientes.length, 'una variante distinta del mismo item_name no mapeada no genera pendiente (se trata como producto nuevo, no como el ya mapeado)');
+  ok(plan.seenItemsUpserts.some(s => s.item_name === 'PST ALFREDO - Fusilli / Arrachera'), 'la variante sin mapear se registra con su nombre completo (item + variante) para que se empareje aparte');
 }
 {
-  const r = receipt({ receipt_number: 'R202', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Extra', option: 'Sin queso' }] }] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
-  ok(!plan.seenModifiersUpserts.some(s => s.modifier_option === 'Sin queso'), 'modificador ignorado: no se vuelve a pedir que se empareje');
-  ok(plan.pendientes[0].ventas.length === 3, 'modificador ignorado: no agrega ninguna fila de ingrediente (1 platillo + 2 ingredientes de la receta nada mas)');
+  // producto sin variante (variant_name null): se usa solo el item_name, como antes
+  const r = receipt({ receipt_number: 'R202', line_items: [{ item_name: 'Cheesecake', variant_name: null, quantity: 1 }] });
+  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set() });
+  ok(plan.pendientes.length === 1 && plan.pendientes[0].ventas.some(v => v.producto === 'Cheesecake'), 'producto sin variante (variant_name null) sigue usando solo el item_name, igual que siempre');
 }
 {
-  const r = receipt({ receipt_number: 'R203', line_items: [{ item_name: 'Producto que no existe', quantity: 1, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
-  ok(!plan.seenModifiersUpserts.length, 'si el platillo mismo no esta mapeado, sus modificadores ni se revisan (se resuelve el platillo primero)');
-}
-{
-  const r = receipt({ receipt_number: 'R204', line_items: [
-    { item_name: 'Cheesecake', quantity: 2, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] },
-    { item_name: 'Café Americano', quantity: 1, line_modifiers: [{ name: 'Tipo de pasta', option: 'Fusilli' }] },
+  // dos lineas del mismo recibo, mismo item_name, variantes distintas, ninguna mapeada -> las dos se registran por separado
+  const r = receipt({ receipt_number: 'R203', line_items: [
+    { item_name: 'CHAPATA', variant_name: 'Mar y tierra', quantity: 1 },
+    { item_name: 'CHAPATA', variant_name: 'Pechuga de pollo', quantity: 1 },
   ] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows });
-  const ventas = plan.pendientes[0].ventas;
-  ok(ventas.some(v => v.producto === 'Arrachera') && ventas.some(v => v.producto === 'Pasta fusilli'), 'varias lineas del mismo recibo con distintos modificadores mapeados suman cada ingrediente por separado');
-}
-{
-  const pausedModMap = [{ modifier_option: 'Arrachera', ingrediente: 'Arrachera', cantidad: 0.15, activo: false }];
-  const r = receipt({ receipt_number: 'R205', line_items: [{ item_name: 'Cheesecake', quantity: 1, line_modifiers: [{ name: 'Proteina', option: 'Arrachera' }] }] });
-  const plan = planSync({ receipts: [r], mapRows, recetasRows, catalogoRows, processedSet: new Set(), modifierMapRows: pausedModMap });
-  ok(!plan.pendientes[0].ventas.some(v => v.producto === 'Arrachera'), 'modificador pausado (activo:false) se trata como sin mapear: no descuenta');
-  ok(plan.seenModifiersUpserts.some(s => s.modifier_option === 'Arrachera'), 'modificador pausado vuelve a aparecer como pendiente de emparejar');
+  const plan = planSync({ receipts: [r], mapRows: [], recetasRows: [], catalogoRows, processedSet: new Set() });
+  ok(plan.seenItemsUpserts.some(s => s.item_name === 'CHAPATA - Mar y tierra') && plan.seenItemsUpserts.some(s => s.item_name === 'CHAPATA - Pechuga de pollo'), 'dos variantes distintas del mismo item_name en un recibo se registran como dos productos separados, no se pisan');
 }
 
 ok(norm('Café Americano') === norm('CAFE   americano'), 'norm() ignora acentos, mayusculas y espacios repetidos, igual que en el resto de la app');
