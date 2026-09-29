@@ -33,21 +33,25 @@ platillo (por ejemplo si empiezas a llevar inventario de esa bebida).
 
 ## Estado del despliegue
 
-Ya desplegado y validado contra la cuenta real de Loyverse (dry-run, luego real). Falta correr el
-parche 006 (abajo) y redesplegar la función con el código de este cambio (combinación
-item_name + variante — ver "Variantes de Loyverse" más abajo).
+Ya desplegado y validado contra la cuenta real de Loyverse (dry-run, luego real). El parche 006
+(revierte "modificadores") y el redespliegue con el código de variantes ya se corrieron.
 
-### Aplicar el parche 006 (revierte el sistema de modificadores)
+**Pendiente: correr el parche 007** para que la sincronización sea automática de verdad (ver
+abajo) — sin eso, la función solo corre cuando alguien la invoca a mano.
 
-Se probó primero un mapeo de "modificadores" aparte (parche `005_loyverse_modificadores.sql`, ya
-corrido contra la base real). Al revisar recibos reales se confirmó que ese no era el mecanismo
-correcto para este negocio (ver "Variantes de Loyverse" más abajo), así que se abandonó. En
-Supabase → SQL Editor, pegar y correr `supabase/patches/006_revertir_modificadores.sql`: borra las
-dos tablas que ya no se usan (`loyverse_modifiers_seen`, `loyverse_modifier_map`). Es idempotente,
-igual que los parches anteriores, y no toca `loyverse_map` ni ninguna otra tabla. (`004` ya se
-había corrido antes; nada que hacer ahí.)
+### Aplicar el parche 007 (programa la corrida automática cada 5 minutos)
 
-### Redesplegar la función
+La función en sí ya funciona bien, pero hasta ahora nada la llamaba sola cada pocos minutos —
+por eso "Última sincronización" se quedaba pegada en la fecha de la última vez que alguien la
+invocó a mano (por ejemplo al probarla). En Supabase → SQL Editor, pegar y correr
+`supabase/patches/007_cron_loyverse_sync.sql`: prende `pg_cron`/`pg_net` si hacía falta y programa
+un job (`loyverse-sync-cada-5-min`) que llama la función cada 5 minutos con la misma llave pública
+que ya usa la app — no requiere ningún secreto nuevo. Es idempotente: se puede volver a correr sin
+duplicar el job. El propio archivo trae, en los comentarios de hasta arriba, la consulta para ver
+el historial de corridas del cron y cómo desactivarlo si algún día hace falta pausar la
+sincronización automática.
+
+### Redesplegar la función (solo si cambia el código, no hace falta para el parche 007)
 
 Desde tu Terminal (no desde aquí, por la política de red de tu cuenta):
 

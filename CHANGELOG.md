@@ -14,6 +14,10 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   acepta o rechaza desde la app — igual que se hacía a mano al cerrar turno — y solo al aceptar se
   escribe de verdad en `ventas` y se descuenta el inventario. "Venta TPV" **no se quita**: sigue
   disponible como respaldo manual.
+- **Parche 007 — programa la corrida automática**: la función ya funcionaba bien, pero nada la
+  llamaba sola cada pocos minutos hasta correr este parche (`pg_cron` + `pg_net`, cada 5 minutos,
+  ver `docs/LOYVERSE.md`); antes de esto, "Última sincronización" solo avanzaba cuando alguien
+  invocaba la función a mano.
 - **Mapeo de productos** (Ajustes → 🔗 Loyverse, solo admin): como los nombres de producto en
   Loyverse no necesariamente coinciden con los platillos de Recetas, cada producto vendido en
   Loyverse aparece una vez en "Por emparejar" hasta que el admin elige a qué platillo corresponde
