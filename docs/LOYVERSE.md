@@ -118,10 +118,14 @@ apareciendo con solo su `item_name`, como siempre.
 
 Cualquier usuario logueado (no solo admin) ve, en la pantalla de Inicio, un aviso cuando hay ventas
 de Loyverse por aceptar, con un botón "Revisar" que abre la pantalla de aceptación. Ahí se ve, para
-los recibos seleccionados (todos por defecto): el total por platillo vendido y el total a
-descontar por ingrediente, más la lista de recibos individuales con casilla para incluir/excluir
-alguno antes de aceptar. "Aceptar" inserta esas ventas de verdad (descuenta inventario) y marca los
-recibos como `aceptado`; "Rechazar" los marca como `rechazado` sin tocar el inventario.
+los recibos seleccionados: el total por platillo vendido y el total a descontar por ingrediente,
+más la lista de recibos individuales con casilla para incluir/excluir cada uno. Los recibos
+**empiezan todos sin seleccionar** — hay que marcar (uno por uno, o con "Todos" por turno) los que
+de verdad se quieran aplicar, así que si sigues descontando a mano en otro lado y solo quieres
+revisar/limpiar la cola, no corres el riesgo de aceptar algo que no querías de un descuido.
+"Aceptar" inserta esas ventas de verdad (descuenta inventario) y marca los recibos como
+`aceptado`; "Rechazar" los marca como `rechazado` sin tocar el inventario — usa "Rechazar" para los
+recibos que ya descontaste manualmente por otro lado, así no se duplica el descuento.
 
 Con muchos recibos pendientes, la lista de recibos aparece agrupada por fecha (más reciente
 primero) y cada fecha empieza colapsada (solo se ve el total del día, clic para desplegar). Dentro
@@ -136,6 +140,17 @@ Al aceptar, las filas que se escriben en `ventas` (el platillo y sus descuentos 
 no quedan con el vendedor genérico `Loyverse` de la sincronización — quedan con el nombre del
 usuario que aceptó el recibo (igual que una venta de TPV normal), para que quede registrado quién
 fue responsable de cada turno.
+
+### Sincronizar/actualizar al momento
+
+La sincronización automática corre sola cada 5 minutos (patch 007), pero tanto en Ajustes → 🔗
+Loyverse como en esta pantalla de aceptar hay un botón ("🔄 Sincronizar ahora" / "🔄 Actualizar")
+que llama la misma función `loyverse-sync` al instante, para ver los datos reales sin esperar el
+siguiente ciclo. En la pantalla de aceptar, el botón refresca la lista de recibos sin cerrar el
+modal, así que si aparece una venta nueva la ves de inmediato. Es una sincronización real (puede
+crear pendientes nuevos, igual que el cron), no una vista previa — y como la función ya evita
+duplicados por su cursor + tabla de recibos procesados, no pasa nada si se aprieta varias veces
+seguidas.
 
 ## Alcance actual
 

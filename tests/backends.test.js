@@ -11,10 +11,20 @@ function tbl(t) { return DBM[t] = DBM[t] || []; }
 const users = [{ id: 'U1', usuario: 'admin', nombre: 'Admin', rol: 'admin', pw: 'secreto' }];
 const log = []; let sawAuth = false;
 let slowMs = 0, noRange = false;
+let fnSyncCalls = 0, fnSyncOnNextCall = null; // mock del Edge Function loyverse-sync (boton "Sincronizar ahora"/"Actualizar")
 function json(res, code, body, extra) { res.writeHead(code, Object.assign({ 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*', 'access-control-expose-headers': 'Content-Range' }, extra || {})); res.end(JSON.stringify(body)); }
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   if (req.method === 'OPTIONS') return json(res, 200, {});
+  if (u.pathname === '/functions/v1/loyverse-sync') {
+    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+      fnSyncCalls++;
+      const st = tbl('loyverse_sync_state'); if (!st.length) st.push({ id: 1 });
+      st[0].last_run_at = new Date().toISOString(); st[0].last_run_ok = true; st[0].last_run_detalle = 'Sincronizacion manual #' + fnSyncCalls;
+      if (fnSyncOnNextCall) { const fn = fnSyncOnNextCall; fnSyncOnNextCall = null; fn(); }
+      json(res, 200, { ok: true });
+    }); return;
+  }
   if (u.pathname.startsWith('/rest/v1/')) {
     let body = ''; req.on('data', d => body += d); req.on('end', () => {
       const p = u.pathname.slice(9); log.push(req.method + ' ' + p + u.search + (body ? ' ' + body.slice(0, 120) : ''));
@@ -345,6 +355,13 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await lvGuardarCambios() }); await pg.waitForTimeout(250);
   lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
   ok(lvh.includes('No hay productos de Loyverse pendientes de emparejar'), 'loy/buscar-pendientes: tras ignorarlos y guardar, "Por emparejar" vuelve a estar vacio');
+  // ---- boton "Sincronizar ahora" en Ajustes -> Loyverse: llama la sincronizacion real, no solo relee lo que ya habia ----
+  const callsAntes0 = fnSyncCalls;
+  await pg.evaluate(() => { const b = [...document.querySelectorAll('.modal button')].find(x => x.textContent.includes('Sincronizar ahora')); b.click() });
+  await pg.waitForTimeout(300);
+  ok(fnSyncCalls === callsAntes0 + 1, 'loy: el boton "Sincronizar ahora" invoca la sincronizacion real con Loyverse');
+  lvh = await pg.evaluate(() => document.getElementById('lvBody').innerText);
+  ok(/Sincronizacion manual #/.test(lvh), 'loy: tras sincronizar se refresca el estado mostrado ("Ultima sincronizacion") sin cerrar el modal');
   await pg.evaluate(() => closeModal());
 
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
@@ -362,8 +379,7 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => openModal('loyverseAceptar')); await pg.waitForTimeout(300);
   ok(await pg.evaluate(() => modalType === 'loyverseAceptar'), 'loy/pend: cualquier usuario logueado (no solo admin) puede abrir la pantalla de ventas por aceptar');
   let pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
-  ok(pendTxt.includes('Flan') && /Flan[\s\S]*3/.test(pendTxt), 'loy/pend: agrega el total de platillos vendidos entre los recibos seleccionados (2+1=3)');
-  ok(/Leche[\s\S]*-6/.test(pendTxt), 'loy/pend: agrega el total de ingredientes a descontar entre los recibos seleccionados (4+2=6)');
+  ok(pendTxt.includes('Nada seleccionado'), 'loy/pend: los recibos empiezan sin seleccionar (nada se descontaria si aceptaras de una vez)');
   // ---- recibos agrupados por fecha (colapsados por defecto) y sub-agrupados por turno (Manana 8am-4pm / Tarde 4pm-8am) ----
   ok(!pendTxt.includes('Recibo R-1') && !pendTxt.includes('Recibo R-2'), 'loy/pend: los recibos vienen agrupados por fecha, colapsados por defecto (no se ve el detalle de cada uno)');
   const fechaGrupo = await pg.evaluate(() => lvPendFecha(S.lvPend[0].fecha));
@@ -372,6 +388,10 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(pendTxt.includes('Recibo R-1') && pendTxt.includes('Recibo R-2'), 'loy/pend: al desplegar el grupo de esa fecha se ven los recibos');
   ok(pendTxt.includes('Mañana'), 'loy/pend: dentro del grupo, los recibos quedan sub-agrupados por turno');
   const seqsGrupo = [DBM.loyverse_pending[0].seq, DBM.loyverse_pending[1].seq];
+  await pg.evaluate((seqs) => { lvPendSelAll(seqs, true) }, seqsGrupo); await pg.waitForTimeout(150);
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(pendTxt.includes('Flan') && /Flan[\s\S]*3/.test(pendTxt), 'loy/pend: el boton "Todos" del turno selecciona sus recibos y agrega el total de platillos vendidos (2+1=3)');
+  ok(/Leche[\s\S]*-6/.test(pendTxt), 'loy/pend: agrega el total de ingredientes a descontar entre los recibos seleccionados (4+2=6)');
   await pg.evaluate((seqs) => { lvPendSelAll(seqs, false) }, seqsGrupo); await pg.waitForTimeout(150);
   pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
   ok(pendTxt.includes('Nada seleccionado'), 'loy/pend: el boton "Ninguno" del turno deselecciona todos sus recibos de un jalon');
@@ -394,12 +414,26 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => closeModal());
   await pg.evaluate(() => { S.currentUser = window._u3 });
   // ---- rechazar: no debe tocar `ventas`, solo marcar estado=rechazado ----
-  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-3', fecha: '2026-09-24T13:00:00Z', resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-3-D0', fecha: '2026-09-24T13:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }], estado: 'pendiente' });
+  const r3fecha = new Date(2026, 8, 24, 13, 0, 0).toISOString();
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-3', fecha: r3fecha, resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-3-D0', fecha: r3fecha, categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }], estado: 'pendiente' });
   await pg.evaluate(() => openModal('loyverseAceptar')); await pg.waitForTimeout(300);
+  const seqR3 = DBM.loyverse_pending.find(p => p.receipt_number === 'R-3').seq;
+  await pg.evaluate((seq) => { lvPendToggleSel(seq) }, seqR3); await pg.waitForTimeout(150); // sin marcarlo, "Rechazar" no tendria nada que hacer
   const ventasAntes = DBM.ventas.length;
   await pg.evaluate(async () => { await lvPendRechazar() }); await pg.waitForTimeout(300);
   ok(DBM.ventas.length === ventasAntes, 'loy/pend: rechazar NO inserta filas en ventas');
   ok(DBM.loyverse_pending.find(p => p.receipt_number === 'R-3').estado === 'rechazado', 'loy/pend: rechazar marca el recibo como estado=rechazado');
+  // ---- boton "Actualizar" en la pantalla de Revisar: sincroniza de verdad y refresca sin cerrar el modal ----
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(pendTxt.includes('No hay ventas de Loyverse pendientes de aceptar'), 'loy/pend: (sanity) tras resolver R-1/R-2/R-3 no quedan pendientes en pantalla');
+  const callsAntes1 = fnSyncCalls;
+  const r4fecha = new Date(2026, 8, 25, 9, 0, 0).toISOString();
+  fnSyncOnNextCall = () => { tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-4', fecha: r4fecha, resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-4-D0', fecha: r4fecha, categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }], estado: 'pendiente' }) };
+  await pg.evaluate(() => { const b = [...document.querySelectorAll('.modal button')].find(x => x.textContent.includes('Actualizar')); b.click() });
+  await pg.waitForTimeout(300);
+  ok(fnSyncCalls === callsAntes1 + 1, 'loy/pend: el boton "Actualizar" de Revisar invoca la sincronizacion real (no solo relee lo que ya habia)');
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(/recibos \(1\)/i.test(pendTxt) && !pendTxt.includes('No hay ventas de Loyverse pendientes'), 'loy/pend: tras sincronizar sin cerrar el modal, aparece la venta nueva detectada en Loyverse');
   await pg.evaluate(() => closeModal());
   // rol no-admin: sin acceso al panel de EMPAREJAR (solo admin), aunque si puede aceptar ventas
   await pg.evaluate(() => { window._u2 = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }) });

@@ -56,18 +56,26 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   nueva.
 - **Pantalla de ventas pendientes** (banner en Inicio, visible para cualquier usuario logueado):
   muestra el total agregado por platillo vendido y por ingrediente a descontar entre los recibos
-  seleccionados (todos por defecto, con casilla para incluir/excluir alguno), y botones
-  Aceptar/Rechazar.
+  seleccionados, con casilla para incluir/excluir cada uno, y botones Aceptar/Rechazar.
 - **Recibos agrupados por fecha y turno, colapsables**: con muchos recibos pendientes la lista
   plana era muy larga y no se podía saber de qué turno era cada uno. Ahora los recibos se agrupan
   por fecha (más reciente primero), cada fecha empieza colapsada (solo se ve el total del día) y,
   al desplegarla, se sub-agrupan por turno — Mañana (8am–4pm) / Tarde (4pm–12am, los mismos
   horarios que ya usa el resto de la app) — cada uno con sus propios botones "Todos"/"Ninguno"
   para seleccionar o quitar de un jalón los recibos de ese turno.
+- **Los recibos empiezan sin seleccionar**: antes venían todos pre-marcados y había que
+  desmarcar los que no interesaban; ahora empiezan todos sin marcar, así solo se selecciona (con
+  el checkbox de cada uno o con "Todos" por turno) lo que de verdad se quiere aplicar — pensado
+  para cuando se sigue descontando a mano y estos recibos solo se usan para lo puntual que
+  interese revisar.
 - **Se registra quién aceptó cada venta**: al aceptar, las filas de `ventas` (el platillo y sus
   descuentos de ingredientes) ya no quedan con el vendedor genérico "Loyverse" — quedan con el
   nombre del usuario que las aceptó, igual que una venta de TPV normal, para saber quién fue
   responsable de cada turno.
+- **Botón "Sincronizar ahora" / "Actualizar"**: tanto en Ajustes → 🔗 Loyverse como en la pantalla
+  de ventas por aceptar hay un botón que llama de una vez la misma sincronización que corre sola
+  cada 5 minutos, para ver los datos reales de Loyverse al momento en vez de esperar al siguiente
+  ciclo automático. En la pantalla de aceptar, refresca la lista sin cerrar el modal.
 - Reembolsos y recibos cancelados se detectan y se omiten por completo (no generan pendiente).
 - Un recibo nunca se aplica dos veces así se cruce un reintento con la siguiente corrida:
   cursor por fecha + tabla `loyverse_processed_receipts` + índice único parcial en `ventas.id`
