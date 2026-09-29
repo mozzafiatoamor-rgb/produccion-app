@@ -76,6 +76,9 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   de ventas por aceptar hay un botón que llama de una vez la misma sincronización que corre sola
   cada 5 minutos, para ver los datos reales de Loyverse al momento en vez de esperar al siguiente
   ciclo automático. En la pantalla de aceptar, refresca la lista sin cerrar el modal.
+  **Requiere redesplegar `loyverse-sync`** (ver `docs/LOYVERSE.md`): la función nunca tuvo
+  cabeceras CORS porque hasta ahora solo la llamaba el cron (servidor-a-servidor); un botón desde
+  el navegador sin esto falla con "Failed to fetch" aunque la función esté bien.
 - Reembolsos y recibos cancelados se detectan y se omiten por completo (no generan pendiente).
 - Un recibo nunca se aplica dos veces así se cruce un reintento con la siguiente corrida:
   cursor por fecha + tabla `loyverse_processed_receipts` + índice único parcial en `ventas.id`

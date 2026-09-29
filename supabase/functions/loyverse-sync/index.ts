@@ -143,14 +143,25 @@ async function run() {
   return { recibos: receipts.length, pendientesCreados: plan.pendientes.length, sinMapear: plan.seenItemsUpserts.length, omitidos: plan.omitted.length };
 }
 
-Deno.serve(async (_req: Request) => {
+// Cabeceras CORS: el cron (pg_net, servidor-a-servidor) nunca las necesito, pero el boton
+// "Sincronizar ahora"/"Actualizar" de la app SI llama esta funcion directo desde el navegador,
+// y sin esto el navegador bloquea la respuesta (se ve como "Failed to fetch" del lado de la app,
+// aunque la funcion si haya corrido bien).
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   try {
     const resultado = await run();
-    return new Response(JSON.stringify(resultado), { headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify(resultado), { headers: { 'content-type': 'application/json', ...CORS_HEADERS } });
   } catch (e) {
     try {
       await sbWrite('loyverse_sync_state?id=eq.1', 'PATCH', { last_run_at: new Date().toISOString(), last_run_ok: false, last_run_detalle: String(e.message || e).slice(0, 500) }, 'return=minimal');
     } catch (_e2) { /* si ni esto se puede escribir, el error igual queda en los logs de la funcion */ }
-    return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 500, headers: { 'content-type': 'application/json', ...CORS_HEADERS } });
   }
 });

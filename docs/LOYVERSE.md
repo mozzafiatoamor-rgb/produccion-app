@@ -36,8 +36,11 @@ platillo (por ejemplo si empiezas a llevar inventario de esa bebida).
 Ya desplegado y validado contra la cuenta real de Loyverse (dry-run, luego real). El parche 006
 (revierte "modificadores") y el redespliegue con el código de variantes ya se corrieron.
 
-**Pendiente: correr el parche 007** para que la sincronización sea automática de verdad (ver
-abajo) — sin eso, la función solo corre cuando alguien la invoca a mano.
+**Pendiente: redesplegar `loyverse-sync`** (ver "Redesplegar la función" abajo) — se le agregaron
+cabeceras CORS para que los botones "Sincronizar ahora"/"Actualizar" de la app puedan llamarla
+directo desde el navegador. Sin redesplegar, esos botones fallan con "Failed to fetch" (el cron
+automático no se ve afectado — corre servidor-a-servidor, sin navegador de por medio, así que
+nunca necesitó CORS).
 
 ### Aplicar el parche 007 (programa la corrida automática cada 5 minutos)
 
@@ -51,7 +54,7 @@ duplicar el job. El propio archivo trae, en los comentarios de hasta arriba, la 
 el historial de corridas del cron y cómo desactivarlo si algún día hace falta pausar la
 sincronización automática.
 
-### Redesplegar la función (solo si cambia el código, no hace falta para el parche 007)
+### Redesplegar la función (necesario ahora mismo, por lo de CORS de arriba)
 
 Desde tu Terminal (no desde aquí, por la política de red de tu cuenta):
 
@@ -61,7 +64,9 @@ npx supabase@latest functions deploy loyverse-sync --use-api
 ```
 
 Los secretos (`LOYVERSE_TOKEN`, `LOYVERSE_DRY_RUN`) no cambian — ya están configurados en
-Supabase → Edge Functions → Secrets.
+Supabase → Edge Functions → Secrets. Si no tienes la CLI de Supabase enlazada desde tu Terminal,
+la alternativa es pegar el contenido actualizado de `supabase/functions/loyverse-sync/index.ts`
+directo en Supabase → Edge Functions → `loyverse-sync` → editar código → Deploy.
 
 ## Emparejar tus productos
 
