@@ -348,8 +348,11 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => closeModal());
 
   // ---- pendientes de aceptar (cualquier usuario logueado): revisar y descontar inventario de comida ----
-  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-1', fecha: '2026-09-24T12:00:00Z', resumen: '2x Flan', ventas_payload: [{ id: 'LOY-R-1-D0', fecha: '2026-09-24T12:00:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 2, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-1-I0', fecha: '2026-09-24T12:00:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 4, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
-  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-2', fecha: '2026-09-24T12:05:00Z', resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-2-D0', fecha: '2026-09-24T12:05:00Z', categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-2-I0', fecha: '2026-09-24T12:05:00Z', categoria: 'Lacteos', producto: 'Leche', cantidad: 2, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
+  // Horas de recibo construidas en hora LOCAL (no UTC fijo) para que "Mañana" (8am-4pm) de por
+  // resultado sin importar la zona horaria de la maquina donde corran las pruebas.
+  const rFecha1 = new Date(2026, 8, 24, 10, 0, 0).toISOString(), rFecha2 = new Date(2026, 8, 24, 10, 5, 0).toISOString();
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-1', fecha: rFecha1, resumen: '2x Flan', ventas_payload: [{ id: 'LOY-R-1-D0', fecha: rFecha1, categoria: 'Postres', producto: 'Flan', cantidad: 2, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-1-I0', fecha: rFecha1, categoria: 'Lacteos', producto: 'Leche', cantidad: 4, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
+  tbl('loyverse_pending').push({ seq: (seqs.loyverse_pending = (seqs.loyverse_pending || 0) + 1), receipt_number: 'R-2', fecha: rFecha2, resumen: '1x Flan', ventas_payload: [{ id: 'LOY-R-2-D0', fecha: rFecha2, categoria: 'Postres', producto: 'Flan', cantidad: 1, vendedor: 'Loyverse', notas: '[Loyverse]' }, { id: 'LOY-R-2-I0', fecha: rFecha2, categoria: 'Lacteos', producto: 'Leche', cantidad: 2, vendedor: 'Loyverse', notas: 'Descuento Loyverse' }], estado: 'pendiente' });
   await pg.evaluate(async () => { await Sheets.loadAll() }); await pg.waitForTimeout(200);
   await pg.evaluate(() => switchTab('home')); await pg.waitForTimeout(150);
   const homeTxt = await pg.evaluate(() => document.getElementById('app').innerText);
@@ -361,6 +364,20 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   let pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
   ok(pendTxt.includes('Flan') && /Flan[\s\S]*3/.test(pendTxt), 'loy/pend: agrega el total de platillos vendidos entre los recibos seleccionados (2+1=3)');
   ok(/Leche[\s\S]*-6/.test(pendTxt), 'loy/pend: agrega el total de ingredientes a descontar entre los recibos seleccionados (4+2=6)');
+  // ---- recibos agrupados por fecha (colapsados por defecto) y sub-agrupados por turno (Manana 8am-4pm / Tarde 4pm-8am) ----
+  ok(!pendTxt.includes('Recibo R-1') && !pendTxt.includes('Recibo R-2'), 'loy/pend: los recibos vienen agrupados por fecha, colapsados por defecto (no se ve el detalle de cada uno)');
+  const fechaGrupo = await pg.evaluate(() => lvPendFecha(S.lvPend[0].fecha));
+  await pg.evaluate((f) => { lvPendToggleDate(f) }, fechaGrupo); await pg.waitForTimeout(150);
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(pendTxt.includes('Recibo R-1') && pendTxt.includes('Recibo R-2'), 'loy/pend: al desplegar el grupo de esa fecha se ven los recibos');
+  ok(pendTxt.includes('Mañana'), 'loy/pend: dentro del grupo, los recibos quedan sub-agrupados por turno');
+  const seqsGrupo = [DBM.loyverse_pending[0].seq, DBM.loyverse_pending[1].seq];
+  await pg.evaluate((seqs) => { lvPendSelAll(seqs, false) }, seqsGrupo); await pg.waitForTimeout(150);
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(pendTxt.includes('Nada seleccionado'), 'loy/pend: el boton "Ninguno" del turno deselecciona todos sus recibos de un jalon');
+  await pg.evaluate((seqs) => { lvPendSelAll(seqs, true) }, seqsGrupo); await pg.waitForTimeout(150);
+  pendTxt = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(/Flan[\s\S]*3/.test(pendTxt), 'loy/pend: el boton "Todos" del turno reselecciona sus recibos de un jalon');
   // deseleccionar un recibo: el agregado debe recalcularse
   const seqPend1 = DBM.loyverse_pending[0].seq;
   await pg.evaluate((seq) => { lvPendToggleSel(seq) }, seqPend1); await pg.waitForTimeout(150);
@@ -370,6 +387,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => { window.confirm = () => true });
   await pg.evaluate(async () => { await lvPendAceptar() }); await pg.waitForTimeout(300);
   ok(DBM.ventas.some(v => v.id === 'LOY-R-1-D0') && DBM.ventas.some(v => v.id === 'LOY-R-2-D0') && DBM.ventas.some(v => v.id === 'LOY-R-1-I0'), 'loy/pend: aceptar inserta de verdad las filas de ventas_payload en la tabla ventas');
+  const acceptorName = await pg.evaluate(() => uName());
+  ok(DBM.ventas.find(v => v.id === 'LOY-R-1-D0').vendedor === acceptorName && DBM.ventas.find(v => v.id === 'LOY-R-1-I0').vendedor === acceptorName, 'loy/pend: al aceptar, las ventas (platillo e ingredientes) quedan registradas con el usuario que acepto, no con "Loyverse" generico');
   ok(DBM.loyverse_pending.every(p => p.estado === 'aceptado' && p.resuelto_por), 'loy/pend: aceptar marca los recibos como estado=aceptado con quien los resolvio');
   ok(await pg.evaluate(() => (S.lvPend || []).length === 0), 'loy/pend: tras aceptar ya no quedan pendientes en pantalla');
   await pg.evaluate(() => closeModal());

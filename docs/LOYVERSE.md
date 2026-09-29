@@ -123,6 +123,20 @@ descontar por ingrediente, más la lista de recibos individuales con casilla par
 alguno antes de aceptar. "Aceptar" inserta esas ventas de verdad (descuenta inventario) y marca los
 recibos como `aceptado`; "Rechazar" los marca como `rechazado` sin tocar el inventario.
 
+Con muchos recibos pendientes, la lista de recibos aparece agrupada por fecha (más reciente
+primero) y cada fecha empieza colapsada (solo se ve el total del día, clic para desplegar). Dentro
+de cada fecha, los recibos se sub-agrupan por turno — **Mañana** (8am–4pm) / **Tarde** (4pm–12am),
+los mismos horarios que ya usa el resto de la app para el turno actual — cada uno con sus propios
+botones "Todos"/"Ninguno" para seleccionar o quitar de un jalón los recibos de ese turno sin tocar
+los de otro turno u otra fecha. El turno se calcula a partir de la hora local del dispositivo que
+está revisando (igual que el resto de la app determina el turno actual), así que debe revisarse
+desde un dispositivo con la hora/zona horaria correcta.
+
+Al aceptar, las filas que se escriben en `ventas` (el platillo y sus descuentos de ingredientes) ya
+no quedan con el vendedor genérico `Loyverse` de la sincronización — quedan con el nombre del
+usuario que aceptó el recibo (igual que una venta de TPV normal), para que quede registrado quién
+fue responsable de cada turno.
+
 ## Alcance actual
 
 Solo Mozzafiato (una sola tienda de Loyverse). Si más adelante manejas más de una tienda o

@@ -701,17 +701,29 @@ function lvPendIsSel(seq){return!(S.lvPendSel&&S.lvPendSel[seq]===false)}
 function lvPendToggleSel(seq){S.lvPendSel=S.lvPendSel||{};S.lvPendSel[seq]=!lvPendIsSel(seq);lvPendRefresh()}
 function lvPendAgg(){var plat={},ing={};(S.lvPend||[]).forEach(function(p){if(!lvPendIsSel(p.seq))return;(p.ventas_payload||[]).forEach(function(v){if(v.notas==='[Loyverse]'){plat[v.producto]=(plat[v.producto]||0)+v.cantidad}else{ing[v.producto]=(ing[v.producto]||0)+v.cantidad}})});return{plat:plat,ing:ing}}
 function lvPendRowHtml2(p){var checked=lvPendIsSel(p.seq);return'<div class="inv-item" style="flex-wrap:wrap;gap:8px"><label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer"><input type="checkbox" '+(checked?'checked':'')+' onchange="lvPendToggleSel('+p.seq+')" style="width:18px;height:18px;flex-shrink:0"><div><div class="inv-name">'+cmEsc(p.resumen||p.receipt_number)+'</div><div class="inv-cat">Recibo '+cmEsc(p.receipt_number)+' \u00b7 '+lvAgo(p.fecha)+'</div></div></label></div>'}
+function lvPendTurno(fecha){var h=new Date(fecha).getHours();return(h>=8&&h<16)?'Ma\u00f1ana':'Tarde'}
+function lvPendFecha(fecha){return _fmtToday.format(new Date(fecha))}
+function lvPendGroups(){var pend=S.lvPend||[];var byDate={};pend.forEach(function(p){var k=lvPendFecha(p.fecha);(byDate[k]=byDate[k]||[]).push(p)});
+  var dates=Object.keys(byDate).sort(function(a,b){var da=a.split('/').reverse().join('-'),db=b.split('/').reverse().join('-');return db.localeCompare(da)});
+  return dates.map(function(d){var items=byDate[d];var turnos={'Ma\u00f1ana':[],'Tarde':[]};items.forEach(function(p){turnos[lvPendTurno(p.fecha)].push(p)});return{fecha:d,items:items,turnos:turnos}})}
+function lvPendToggleDate(fecha){S.lvPendOpenDates=S.lvPendOpenDates||{};S.lvPendOpenDates[fecha]=!S.lvPendOpenDates[fecha];lvPendRefresh()}
+function lvPendSelAll(seqs,val){S.lvPendSel=S.lvPendSel||{};seqs.forEach(function(seq){S.lvPendSel[seq]=val});lvPendRefresh()}
+function lvPendGroupsHtml(){var groups=lvPendGroups();if(!groups.length)return'';
+  return groups.map(function(g){var open=!!(S.lvPendOpenDates&&S.lvPendOpenDates[g.fecha]);var body='';
+    ['Ma\u00f1ana','Tarde'].forEach(function(t){var items=g.turnos[t];if(!items.length)return;var seqs=items.map(function(p){return p.seq});
+      body+='<div style="font-size:11px;font-weight:700;color:var(--text2);margin:8px 0 4px;display:flex;justify-content:space-between;align-items:center"><span>'+(t==='Ma\u00f1ana'?'\u2600\ufe0f':'\u{1F319}')+' '+t+' ('+items.length+')</span><span><button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px" onclick=\'lvPendSelAll('+JSON.stringify(seqs)+',true)\'>Todos</button> <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:10px" onclick=\'lvPendSelAll('+JSON.stringify(seqs)+',false)\'>Ninguno</button></span></div>'+items.map(lvPendRowHtml2).join('')});
+    return'<div style="margin-bottom:6px"><div onclick="lvPendToggleDate(\''+g.fecha+'\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface2);border-radius:10px;font-weight:700;font-size:13px"><span>\u{1F4C5} '+g.fecha+' ('+g.items.length+')</span><span style="font-size:12px;color:var(--text2);font-weight:400">'+(open?'\u25be Ocultar':'\u25b8 Mostrar')+'</span></div>'+(open?'<div style="padding:4px 2px">'+body+'</div>':'')+'</div>'}).join('')}
 function lvPendBodyHtml(){var pend=S.lvPend||[];if(!pend.length)return'<div style="text-align:center;padding:24px;color:var(--text2)"><div style="font-size:40px;margin-bottom:8px">\u2705</div>No hay ventas de Loyverse pendientes de aceptar.</div>';
   var agg=lvPendAgg(),platKeys=Object.keys(agg.plat).sort(),ingKeys=Object.keys(agg.ing).sort();
   var h='<div class="card-title" style="margin-bottom:8px">\u{1F4CB} Se descontar\u00e1 (seleccionados)</div>';
   h+=platKeys.length?'<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Platillos vendidos</div>'+platKeys.map(function(k){return'<div class="inv-item"><div class="inv-name">'+cmEsc(k)+'</div><div style="font-family:JetBrains Mono;font-weight:700">'+agg.plat[k]+'</div></div>'}).join(''):'<div style="font-size:12px;color:var(--text2)">Nada seleccionado</div>';
   h+=ingKeys.length?'<div style="font-size:11px;color:var(--text2);margin:10px 0 6px">Ingredientes a descontar</div>'+ingKeys.map(function(k){return'<div class="inv-item"><div class="inv-name">'+cmEsc(k)+'</div><div style="font-family:JetBrains Mono;font-weight:700;color:var(--red)">-'+Math.ceil(agg.ing[k])+'</div></div>'}).join(''):'';
-  h+='<div class="card-title" style="margin:16px 0 8px">\u{1F9FE} Recibos ('+pend.length+')</div>'+pend.map(lvPendRowHtml2).join('');
+  h+='<div class="card-title" style="margin:16px 0 8px">\u{1F9FE} Recibos ('+pend.length+')</div>'+lvPendGroupsHtml();
   return h}
 async function lvPendAceptar(){var pend=S.lvPend||[],sel=pend.filter(function(p){return lvPendIsSel(p.seq)});if(!sel.length){toast('Selecciona al menos un recibo',1);return}
   if(!confirm('\u00bfAceptar '+sel.length+' recibo'+(sel.length!==1?'s':'')+' y descontar el inventario correspondiente?'))return;
   showWorking();
-  try{var rows=[];sel.forEach(function(p){(p.ventas_payload||[]).forEach(function(v){rows.push(v)})});
+  try{var rows=[];sel.forEach(function(p){(p.ventas_payload||[]).forEach(function(v){rows.push(Object.assign({},v,{vendedor:uName()}))})});
     if(rows.length)await SBK.req('ventas?on_conflict=id&resolution=ignore-duplicates',{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(rows)});
     var seqs=sel.map(function(p){return p.seq}).join(',');
     await SBK.req('loyverse_pending?seq=in.('+seqs+')',{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({estado:'aceptado',resuelto_por:uName(),resuelto_at:new Date().toISOString()})});

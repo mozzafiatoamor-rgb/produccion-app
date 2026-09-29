@@ -58,6 +58,16 @@ una rama y se registra aquí y en git. `main` = producción (no se modifica sin 
   muestra el total agregado por platillo vendido y por ingrediente a descontar entre los recibos
   seleccionados (todos por defecto, con casilla para incluir/excluir alguno), y botones
   Aceptar/Rechazar.
+- **Recibos agrupados por fecha y turno, colapsables**: con muchos recibos pendientes la lista
+  plana era muy larga y no se podía saber de qué turno era cada uno. Ahora los recibos se agrupan
+  por fecha (más reciente primero), cada fecha empieza colapsada (solo se ve el total del día) y,
+  al desplegarla, se sub-agrupan por turno — Mañana (8am–4pm) / Tarde (4pm–12am, los mismos
+  horarios que ya usa el resto de la app) — cada uno con sus propios botones "Todos"/"Ninguno"
+  para seleccionar o quitar de un jalón los recibos de ese turno.
+- **Se registra quién aceptó cada venta**: al aceptar, las filas de `ventas` (el platillo y sus
+  descuentos de ingredientes) ya no quedan con el vendedor genérico "Loyverse" — quedan con el
+  nombre del usuario que las aceptó, igual que una venta de TPV normal, para saber quién fue
+  responsable de cada turno.
 - Reembolsos y recibos cancelados se detectan y se omiten por completo (no generan pendiente).
 - Un recibo nunca se aplica dos veces así se cruce un reintento con la siguiente corrida:
   cursor por fecha + tabla `loyverse_processed_receipts` + índice único parcial en `ventas.id`
