@@ -3,6 +3,25 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `fix/loyverse-aceptar-conflict`
+
+### Corregido (error 400 al "Aceptar" ventas de Loyverse — bloqueaba producción)
+- Al aceptar un recibo pendiente, el insert a `ventas` mandaba
+  `?on_conflict=id&resolution=ignore-duplicates`. Postgres rechazaba esa petición con
+  `42P10` ("no hay índice único que coincida con la especificación de ON CONFLICT"), porque
+  el único índice único sobre `ventas.id` es **parcial** (`where id like 'LOY-%'`) y
+  PostgREST no puede mandarle la condición `WHERE` a Postgres para que lo use como árbitro del
+  `ON CONFLICT`. Resultado: nadie podía aceptar ventas de Loyverse (primer intento real en
+  producción, reportado por Gustavo).
+- Arreglo mínimo: el insert ya no pide `on_conflict`/`ignore-duplicates`; es un `INSERT` normal.
+  El índice parcial sigue protegiendo contra un `LOY-*` duplicado literal (ahora como error ruidoso
+  `23505` en vez de ignorarlo en silencio, que es preferible a no poder aceptar nada). Mejora
+  pendiente, no urgente: una función en Postgres que haga el `ON CONFLICT (id) WHERE id LIKE
+  'LOY-%' DO NOTHING` de verdad y marque el recibo como aceptado en la misma transacción.
+- Solo cambia `index.html` (ningún parche SQL ni redespliegue de función). Pruebas: mismas 100+
+  comprobaciones de `tests/backends.test.js`, incluida "aceptar inserta de verdad las filas... en
+  la tabla ventas", todas en verde.
+
 ## [Sin publicar] — rama `feat/loyverse-integration`
 
 ### Agregado — ventas de Loyverse por aceptar, con descuento de inventario de comida (solo Mozzafiato)

@@ -132,6 +132,12 @@ revisar/limpiar la cola, no corres el riesgo de aceptar algo que no querías de 
 `aceptado`; "Rechazar" los marca como `rechazado` sin tocar el inventario — usa "Rechazar" para los
 recibos que ya descontaste manualmente por otro lado, así no se duplica el descuento.
 
+**Corregido (oct-2026):** el insert de "Aceptar" pedía `on_conflict=id&resolution=ignore-duplicates`
+contra un índice único *parcial* (`ventas.id where id like 'LOY-%'`), algo que Postgres rechaza con
+error `42P10` porque PostgREST no puede mandar la condición `WHERE` como parte de `ON CONFLICT`.
+Esto bloqueaba "Aceptar" para todo el mundo en producción (primer intento real, sep-2026). Ahora es
+un `INSERT` normal (ver `CHANGELOG.md`, rama `fix/loyverse-aceptar-conflict`).
+
 Con muchos recibos pendientes, la lista de recibos aparece agrupada por fecha (más reciente
 primero) y cada fecha empieza colapsada (solo se ve el total del día, clic para desplegar). Dentro
 de cada fecha, los recibos se sub-agrupan por turno — **Mañana** (8am–4pm) / **Tarde** (4pm–12am),

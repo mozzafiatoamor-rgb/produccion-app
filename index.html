@@ -734,7 +734,7 @@ async function lvPendAceptar(){var pend=S.lvPend||[],sel=pend.filter(function(p)
   if(!confirm('\u00bfAceptar '+sel.length+' recibo'+(sel.length!==1?'s':'')+' y descontar el inventario correspondiente?'))return;
   showWorking();
   try{var rows=[];sel.forEach(function(p){(p.ventas_payload||[]).forEach(function(v){rows.push(Object.assign({},v,{vendedor:uName()}))})});
-    if(rows.length)await SBK.req('ventas?on_conflict=id&resolution=ignore-duplicates',{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(rows)});
+    if(rows.length)await SBK.req('ventas',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(rows)});
     var seqs=sel.map(function(p){return p.seq}).join(',');
     await SBK.req('loyverse_pending?seq=in.('+seqs+')',{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({estado:'aceptado',resuelto_por:uName(),resuelto_at:new Date().toISOString()})});
     var resumenTotal=sel.map(function(p){return p.resumen}).join(' | ');
