@@ -35,6 +35,40 @@ const server = http.createServer((req, res) => {
       if (p === 'rpc/app_list_users') return json(res, 200, users.map(({ pw, ...r }) => r));
       if (p === 'rpc/app_verify_admin') { const b = JSON.parse(body); const f = users.find(x => x.rol === 'admin' && b.p_password && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
       if (p === 'rpc/app_login') { const b = JSON.parse(body); const f = users.find(x => x.usuario === b.p_usuario.toLowerCase() && x.pw === b.p_password); return json(res, 200, f ? [{ id: f.id, usuario: f.usuario, nombre: f.nombre, rol: f.rol }] : []); }
+      if (p === 'rpc/admin_create_user') {
+        const b = JSON.parse(body);
+        const admin = users.find(x => x.rol === 'admin' && b.p_admin_password && x.pw === b.p_admin_password);
+        if (!admin) return json(res, 400, { message: 'Contraseña de administrador incorrecta' });
+        if (!b.p_usuario || !b.p_password) return json(res, 400, { message: 'Falta el usuario o la contraseña' });
+        if (users.some(x => x.usuario.toLowerCase() === b.p_usuario.toLowerCase())) return json(res, 400, { message: 'Ese usuario ya existe' });
+        const rol = b.p_rol === 'admin' ? 'admin' : 'usuario';
+        const nu = { id: b.p_id, usuario: b.p_usuario, nombre: b.p_nombre || '', rol, pw: b.p_password };
+        users.push(nu);
+        return json(res, 200, [{ id: nu.id, usuario: nu.usuario, nombre: nu.nombre, rol: nu.rol }]);
+      }
+      if (p === 'rpc/admin_update_user') {
+        const b = JSON.parse(body);
+        const admin = users.find(x => x.rol === 'admin' && b.p_admin_password && x.pw === b.p_admin_password);
+        if (!admin) return json(res, 400, { message: 'Contraseña de administrador incorrecta' });
+        const target = users.find(x => x.usuario === b.p_usuario_actual);
+        if (!target) return json(res, 400, { message: 'Usuario no encontrado' });
+        const rol = b.p_rol === 'admin' ? 'admin' : 'usuario';
+        if (target.rol === 'admin' && rol !== 'admin' && users.filter(x => x.rol === 'admin').length <= 1) return json(res, 400, { message: 'No puedes quitarle el rol de admin al único administrador' });
+        if (b.p_usuario_nuevo.toLowerCase() !== target.usuario.toLowerCase() && users.some(x => x.usuario.toLowerCase() === b.p_usuario_nuevo.toLowerCase())) return json(res, 400, { message: 'Ese usuario ya existe' });
+        target.usuario = b.p_usuario_nuevo; target.nombre = b.p_nombre || ''; target.rol = rol;
+        if (b.p_password) target.pw = b.p_password;
+        return json(res, 200, [{ id: target.id, usuario: target.usuario, nombre: target.nombre, rol: target.rol }]);
+      }
+      if (p === 'rpc/admin_delete_user') {
+        const b = JSON.parse(body);
+        const admin = users.find(x => x.rol === 'admin' && b.p_admin_password && x.pw === b.p_admin_password);
+        if (!admin) return json(res, 400, { message: 'Contraseña de administrador incorrecta' });
+        const i = users.findIndex(x => x.usuario === b.p_usuario);
+        if (i < 0) return json(res, 400, { message: 'Usuario no encontrado' });
+        if (users[i].rol === 'admin' && users.filter(x => x.rol === 'admin').length <= 1) return json(res, 400, { message: 'No puedes eliminar al único administrador' });
+        users.splice(i, 1);
+        return json(res, 200, {});
+      }
       const t = p; const rows = tbl(t);
       if (req.method === 'POST') {
         const parsed = JSON.parse(body); const arr = Array.isArray(parsed) ? parsed : [parsed];
@@ -125,6 +159,11 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(() => _qCount() === 1), 'demo: cola offline guarda cuando falla el backend');
   await pg.reload(); await pg.waitForTimeout(800);
   ok(await pg.evaluate(() => S.screen === 'main'), 'demo: sesion persistente tras recargar');
+  // panel de usuarios (demo: misma logica que supabase pero local, sin pedir nada al servidor)
+  ok(await pg.evaluate(async () => { try { await Sheets.createUser('mala', 'U9', 'nuevo', '1234', 'Nuevo', 'usuario'); return false } catch (e) { return /incorrecta/.test(e.message) } }), 'demo: createUser rechaza contraseña de admin incorrecta');
+  ok(await pg.evaluate(async () => { const r = await Sheets.createUser('admin123', 'U9', 'nuevo', '1234', 'Nuevo Empleado', 'usuario'); return r.usuario === 'nuevo' && S.usuarios.some(u => u.usuario === 'nuevo') }), 'demo: createUser agrega el usuario (local)');
+  ok(await pg.evaluate(async () => { try { await Sheets.deleteUser('admin123', 'admin'); return false } catch (e) { return /\u00fanico administrador/.test(e.message) } }), 'demo: deleteUser no deja eliminar al unico admin');
+  ok(await pg.evaluate(async () => { await Sheets.deleteUser('admin123', 'nuevo'); return !S.usuarios.some(u => u.usuario === 'nuevo') }), 'demo: deleteUser elimina un usuario normal');
   // resetApp conserva backend
   await pg.evaluate(() => resetApp()); ok(await pg.evaluate(() => localStorage.getItem('backend') === 'demo'), 'demo: resetApp conserva la config del backend');
   await ctx.close();
@@ -216,6 +255,60 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(async () => { await cmToggle(2) });
   await pg.evaluate(() => { SBK.req = window._o });
   ok(DBM.catalogo[0].activo === true && await pg.evaluate(() => S.catalogo.some(p => p.producto === 'Cheesecake' && p.categoria === 'Pasteles')), 'cat/sb: si falla la red no cambia nada (ni en la DB ni en pantalla)');
+
+  // ---- panel de usuarios (crear/editar/eliminar, solo admin, confirmando con la contraseña de un admin) ----
+  await pg.evaluate(() => openModal('usuarios'));
+  let umh = await pg.evaluate(() => document.querySelector('.modal').innerText);
+  ok(umh.includes('Usuarios') && umh.includes('Admin') && !umh.includes('Empleado'), 'um/sb: el panel lista a los usuarios existentes (solo el admin inicial)');
+  await pg.evaluate(() => umOpenNew());
+  ok(await pg.evaluate(() => modalType === 'userForm' && !!document.getElementById('umU')), 'um/sb: "Nuevo usuario" abre el formulario');
+  await pg.evaluate(() => { document.getElementById('umU').value = 'maria'; document.getElementById('umN').value = 'María Pérez'; document.getElementById('umP').value = '12'; });
+  await pg.evaluate(() => umSubmitForm());
+  ok(await pg.evaluate(() => modalType === 'userForm'), 'um/sb: contraseña muy corta se rechaza sin llegar al servidor');
+  await pg.evaluate(() => { document.getElementById('umP').value = '1234'; });
+  await pg.evaluate(() => umSubmitForm());
+  ok(await pg.evaluate(() => modalType === 'userAuth'), 'um/sb: con los datos completos, pide la contraseña de un admin para confirmar');
+  await pg.evaluate(() => umConfirmAuth('mala'));
+  ok(users.length === 1 && await pg.evaluate(() => modalType === 'userAuth'), 'um/sb: contraseña de admin incorrecta no crea el usuario');
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users.length === 2 && users[1].usuario === 'maria' && users[1].rol === 'usuario' && await pg.evaluate(() => modalType === 'usuarios'), 'um/sb: contraseña correcta crea el usuario y vuelve a la lista');
+  ok(DBM.bitacora.some(b => /Usuario creado/.test(JSON.stringify(b))), 'um/sb: la creacion queda en la bitacora');
+  await pg.evaluate(() => umOpenNew());
+  await pg.evaluate(() => { document.getElementById('umU').value = 'MARIA'; document.getElementById('umN').value = 'Otra'; document.getElementById('umP').value = '5678'; });
+  await pg.evaluate(() => umSubmitForm());
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users.length === 2, 'um/sb: no deja crear un usuario con el mismo nombre (sin importar mayusculas)');
+  await pg.evaluate(() => umOpenEdit('maria'));
+  ok(await pg.evaluate(() => document.getElementById('umU').value === 'maria' && document.getElementById('umR').value === 'usuario'), 'um/sb: editar precarga los datos actuales');
+  await pg.evaluate(() => { document.getElementById('umN').value = 'Maria P.'; document.getElementById('umR').value = 'admin'; });
+  await pg.evaluate(() => umSubmitForm());
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users[1].nombre === 'Maria P.' && users[1].rol === 'admin' && users[1].pw === '1234', 'um/sb: editar guarda nombre/rol y conserva la contraseña si se deja en blanco');
+  await pg.evaluate(() => umOpenEdit('maria'));
+  await pg.evaluate(() => { document.getElementById('umR').value = 'usuario'; });
+  await pg.evaluate(() => umSubmitForm());
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users[1].rol === 'usuario', 'um/sb: se le puede quitar el admin a alguien si no es el unico');
+  await pg.evaluate(() => umOpenEdit('admin'));
+  await pg.evaluate(() => { document.getElementById('umR').value = 'usuario'; });
+  await pg.evaluate(() => umSubmitForm());
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users[0].rol === 'admin', 'um/sb: no deja quitarle el admin al unico administrador');
+  await pg.evaluate(() => umOpenEdit('admin'));
+  await pg.evaluate(() => { document.getElementById('umN').value = 'Administrador General'; document.getElementById('umR').value = 'admin'; });
+  await pg.evaluate(() => umSubmitForm());
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users[0].nombre === 'Administrador General' && await pg.evaluate(() => S.currentUser.nombre === 'Administrador General' && S.screen === 'main'), 'um/sb: editar tu propia cuenta actualiza la sesion sin cerrarla');
+  await pg.evaluate(() => umAskDelete('admin'));
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users.length === 2, 'um/sb: no deja eliminar al unico administrador');
+  await pg.evaluate(() => umAskDelete('maria'));
+  await pg.evaluate(() => umConfirmAuth('secreto'));
+  ok(users.length === 1 && await pg.evaluate(() => modalType === 'usuarios' && !document.querySelector('.modal').innerText.includes('Maria')), 'um/sb: eliminar un usuario normal funciona y refresca la lista');
+  await pg.evaluate(() => { window._u2 = S.currentUser; S.currentUser = Object.assign({}, S.currentUser, { rol: 'cocina' }); closeModal() });
+  await pg.evaluate(() => openModal('usuarios'));
+  ok(await pg.evaluate(() => modalType !== 'usuarios'), 'um/sb: rol cocina no puede abrir el panel de usuarios');
+  await pg.evaluate(() => { S.currentUser = window._u2; closeModal() });
 
   // ---- integracion con Loyverse (solo admin, solo Supabase) ----
   tbl('loyverse_seen_items').push({ item_name: 'Flan de la casa', item_id: 'LV1', veces: 3, ultima_vez: '2026-09-24T10:00:00Z' });
@@ -533,6 +626,7 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(async () => (await Sheets.verifyAdmin('pw-admin'))?.nombre === 'Gustavo' && (await Sheets.verifyAdmin('pw-coc')) === null && (await Sheets.verifyAdmin('')) === null), 'gs: verifyAdmin compara con la hoja; rol cocina no sirve; vacia rechazada');
   ok(await pg.evaluate(async () => (await Sheets.checkLogin('coc', 'pw-coc'))?.rol === 'cocina' && (await Sheets.checkLogin('coc', 'mala')) === undefined), 'gs: login conserva el rol cocina');
   ok(await pg.evaluate(async () => { try { await Sheets.updateRow(CAT_SHEET, 2, ['a', 'b', 'c', 0, '', 'NO']); return false } catch (e) { return /Supabase/.test(e.message) } }) && posts.length === 2, 'gs: editar catalogo no esta disponible en modo Sheets (mensaje claro, no manda nada)');
+  ok(await pg.evaluate(async () => { try { await Sheets.createUser('x', 'U9', 'n', '1234', 'N', 'usuario'); return false } catch (e) { return /No disponible/.test(e.message) } }), 'gs: el panel de usuarios no esta disponible en modo Sheets');
   ok(await pg.evaluate(async () => { await Sheets.loadAll(); return S.catalogoTodos.length === 2 && S.catalogo.length === 1 && S.catalogoTodos[0].activo === 'SÍ' }), 'gs: catalogoTodos tambien en modo Sheets; "Sí" cuenta como activo');
   await pg.evaluate(() => { GS.append = async () => { throw new Error('sin red') }; });
   await pg.evaluate(async () => { try { await Sheets.append('\u{1F4B0} Ventas', ['V2', '23/09/2026', 'x', 'Flan', 1, 'u', '']) } catch (e) { } });

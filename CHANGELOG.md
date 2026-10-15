@@ -3,6 +3,31 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `feat/panel-usuarios`
+
+### Agregado — panel de usuarios (crear/editar/eliminar desde la app, solo admin)
+- Ajustes → 👥 Administrar usuarios (solo visible para admin): lista los usuarios, con botón
+  "➕ Nuevo usuario" y, por cada uno, ✏️ Editar / 🗑️ Eliminar.
+- Crear/editar: usuario (para iniciar sesión), nombre completo, contraseña (al editar, se puede
+  dejar en blanco para no cambiarla) y rol (🔑 Admin / 👤 Empleado — "cocina" sigue funcionando
+  igual que antes para quien ya lo tenía, simplemente ya no es una opción nueva a elegir).
+- Eliminar es definitivo (no hay "desactivar"): no podrá volver a iniciar sesión. El historial de
+  ventas/producción no se pierde porque ahí solo se guarda el nombre, no una referencia a la cuenta.
+- Seguridad: como la app solo usa la llave pública (anon) y no hay sesión de Supabase Auth por
+  usuario, crear/editar/eliminar vuelve a pedir y verificar en el servidor la contraseña real de
+  un admin (no basta con que el navegador ya sepa que "eres admin") — igual que ya hace la app
+  para reabrir turno o autorizar correcciones. Ningún cambio deja sin el rol de admin ni elimina
+  al único administrador que quede (para no perder el acceso).
+- `supabase/patches/008_admin_user_management.sql` (y `schema.sql`): tres funciones nuevas
+  (`admin_create_user`, `admin_update_user`, `admin_delete_user`) que sí puede llamar el
+  navegador — a diferencia de `admin_upsert_user` (ya existía, solo para `service_role`/SQL a
+  mano). **Hay que ejecutar el parche 008 en el SQL Editor antes de publicar.**
+- Pruebas: cobertura completa en Supabase (listar, crear con validaciones, contraseña de admin
+  incorrecta, duplicados, editar conservando la contraseña si se deja en blanco, no quitar el
+  admin ni eliminar al único administrador, editar tu propia cuenta sin cerrar tu sesión, rol
+  cocina no puede abrir el panel) + Demo (misma lógica en local) + aviso claro de "no disponible"
+  en modo Sheets.
+
 ## [Sin publicar] — rama `fix/loyverse-aceptar-conflict`
 
 ### Corregido (error 400 al "Aceptar" ventas de Loyverse — bloqueaba producción)

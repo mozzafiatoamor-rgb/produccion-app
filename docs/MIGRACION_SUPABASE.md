@@ -62,6 +62,7 @@ idéntico antes y después). Protecciones:
 3. Pegar `supabase/schema.sql` en *SQL Editor* → Run. Agregar `produccion_app` a *Exposed schemas*.
 3a. Si `schema.sql` se ejecutó **antes** del 23-sep (versión sin `app_verify_admin` y con CHECK de roles), ejecutar también `supabase/patches/001_roles_y_verificar_admin.sql`. En instalaciones nuevas no hace falta.
 3b. Para administrar el catálogo desde la app (activar/desactivar/editar productos) ejecutar `supabase/patches/002_catalogo_update.sql`. En instalaciones nuevas ya viene en `schema.sql`.
+3c. Para el panel de usuarios (crear/editar/eliminar usuarios desde la app) ejecutar `supabase/patches/008_admin_user_management.sql`. En instalaciones nuevas ya viene en `schema.sql`.
 3b. **Verificar la conexión** (solo lectura, con la llave pública): en `migration/.env` poner `SUPABASE_URL` y `SUPABASE_ANON_KEY`, y correr `node migration/check.mjs`. Todo debe salir ✓ antes de seguir.
 4. `cp migration/.env.example migration/.env` y llenar `GOOGLE_SHEET_ID`, `GOOGLE_API_KEY`
    (los mismos que usa la app; solo lectura), `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`

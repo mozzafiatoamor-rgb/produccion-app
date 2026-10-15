@@ -269,6 +269,96 @@ grant execute on function produccion_app.app_login(text,text) to anon;
 grant execute on function produccion_app.app_list_users()     to anon;
 grant execute on function produccion_app.app_verify_admin(text) to anon;
 
+-- Panel de usuarios (crear/editar/eliminar desde la app, solo admin). A diferencia de
+-- admin_upsert_user() (arriba, solo service_role), estas SI las puede llamar el navegador
+-- (anon) -- por eso cada una vuelve a pedir y verificar la contrasena real de un admin
+-- (p_admin_password), igual que ya hace app_verify_admin() para reabrir turno / autorizar
+-- correcciones: la app no tiene sesion de Supabase Auth por usuario, asi que no puede
+-- confiar solo en el "es admin" que ya decidio el navegador.
+create or replace function produccion_app._check_admin_password(p_password text)
+returns void
+language plpgsql security definer set search_path = produccion_app, extensions, pg_temp
+as $$
+begin
+  if coalesce(p_password, '') = '' or not exists (
+    select 1 from produccion_app.usuarios u
+    where u.rol = 'admin' and u.password_hash is not null
+      and u.password_hash = crypt(p_password, u.password_hash)
+  ) then
+    raise exception 'Contraseña de administrador incorrecta';
+  end if;
+end $$;
+revoke all on function produccion_app._check_admin_password(text) from public, anon, authenticated;
+
+create or replace function produccion_app.admin_create_user(
+  p_admin_password text, p_id text, p_usuario text, p_password text, p_nombre text, p_rol text
+) returns table (id text, usuario text, nombre text, rol text)
+language plpgsql security definer set search_path = produccion_app, extensions, pg_temp
+as $$
+declare v_rol text;
+begin
+  perform produccion_app._check_admin_password(p_admin_password);
+  if coalesce(trim(p_usuario), '') = '' then raise exception 'Falta el usuario'; end if;
+  if coalesce(p_password, '') = '' then raise exception 'Falta la contraseña'; end if;
+  v_rol := case when lower(trim(coalesce(p_rol, ''))) = 'admin' then 'admin' else 'usuario' end;
+  if exists (select 1 from produccion_app.usuarios u where lower(u.usuario) = lower(trim(p_usuario))) then
+    raise exception 'Ese usuario ya existe';
+  end if;
+  insert into produccion_app.usuarios (id, usuario, password_hash, nombre, rol)
+  values (p_id, trim(p_usuario), crypt(p_password, gen_salt('bf')), coalesce(trim(p_nombre), ''), v_rol);
+  return query select u.id, u.usuario, u.nombre, u.rol from produccion_app.usuarios u where lower(u.usuario) = lower(trim(p_usuario));
+end $$;
+revoke all on function produccion_app.admin_create_user(text,text,text,text,text,text) from public, anon, authenticated;
+grant execute on function produccion_app.admin_create_user(text,text,text,text,text,text) to anon;
+
+create or replace function produccion_app.admin_update_user(
+  p_admin_password text, p_usuario_actual text, p_usuario_nuevo text, p_password text, p_nombre text, p_rol text
+) returns table (id text, usuario text, nombre text, rol text)
+language plpgsql security definer set search_path = produccion_app, extensions, pg_temp
+as $$
+declare v_rol text; v_old_rol text;
+begin
+  perform produccion_app._check_admin_password(p_admin_password);
+  if coalesce(trim(p_usuario_nuevo), '') = '' then raise exception 'Falta el usuario'; end if;
+  select u.rol into v_old_rol from produccion_app.usuarios u where u.usuario = p_usuario_actual;
+  if v_old_rol is null then raise exception 'Usuario no encontrado'; end if;
+  v_rol := case when lower(trim(coalesce(p_rol, ''))) = 'admin' then 'admin' else 'usuario' end;
+  if v_old_rol = 'admin' and v_rol <> 'admin'
+     and (select count(*) from produccion_app.usuarios u where u.rol = 'admin') <= 1 then
+    raise exception 'No puedes quitarle el rol de admin al único administrador';
+  end if;
+  if lower(trim(p_usuario_nuevo)) <> lower(p_usuario_actual)
+     and exists (select 1 from produccion_app.usuarios u where lower(u.usuario) = lower(trim(p_usuario_nuevo))) then
+    raise exception 'Ese usuario ya existe';
+  end if;
+  update produccion_app.usuarios u set
+    usuario = trim(p_usuario_nuevo),
+    nombre = coalesce(trim(p_nombre), u.nombre),
+    rol = v_rol,
+    password_hash = case when coalesce(p_password, '') <> '' then crypt(p_password, gen_salt('bf')) else u.password_hash end
+  where u.usuario = p_usuario_actual;
+  return query select u.id, u.usuario, u.nombre, u.rol from produccion_app.usuarios u where u.usuario = trim(p_usuario_nuevo);
+end $$;
+revoke all on function produccion_app.admin_update_user(text,text,text,text,text,text) from public, anon, authenticated;
+grant execute on function produccion_app.admin_update_user(text,text,text,text,text,text) to anon;
+
+create or replace function produccion_app.admin_delete_user(p_admin_password text, p_usuario text)
+returns void
+language plpgsql security definer set search_path = produccion_app, extensions, pg_temp
+as $$
+declare v_rol text;
+begin
+  perform produccion_app._check_admin_password(p_admin_password);
+  select u.rol into v_rol from produccion_app.usuarios u where u.usuario = p_usuario;
+  if v_rol is null then raise exception 'Usuario no encontrado'; end if;
+  if v_rol = 'admin' and (select count(*) from produccion_app.usuarios u where u.rol = 'admin') <= 1 then
+    raise exception 'No puedes eliminar al único administrador';
+  end if;
+  delete from produccion_app.usuarios u where u.usuario = p_usuario;
+end $$;
+revoke all on function produccion_app.admin_delete_user(text,text) from public, anon, authenticated;
+grant execute on function produccion_app.admin_delete_user(text,text) to anon;
+
 
 -- =====================================================================
 -- Integración con Loyverse (descuento automático de inventario por venta)
