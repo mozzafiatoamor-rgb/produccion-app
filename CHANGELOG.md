@@ -3,6 +3,27 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `fix/loyverse-emparejar-sugerencias-movil`
+
+### Corregido (no aparecian sugerencias al emparejar un platillo con Loyverse, en Android)
+- El campo para elegir el platillo en "Por emparejar" (Ajustes -> Loyverse) usaba un
+  `<input list="...">` con un `<datalist>` del navegador para mostrar sugerencias mientras se
+  escribe. Ese mecanismo nativo es conocido por no funcionar de forma confiable en varios
+  navegadores de celular -- reportado por Gustavo: en Android no aparecia ninguna sugerencia al
+  escribir, para ningun platillo (no solo el que acababa de agregar, sino todos).
+- Arreglo: el campo ya no depende del datalist nativo. Ahora usa el mismo mecanismo de
+  sugerencias propio (JS controlado por la app) que ya se usaba en "Escribir ingrediente" al
+  editar una receta -- una lista desplegable bajo el campo que se filtra con cada tecla
+  (`lvFilterPlatilloSuggest`), ignorando acentos/mayusculas igual que el resto de la app, y al
+  tocar una sugerencia se guarda como seleccion pendiente (`lvSelectPlatillo`), igual que antes.
+  Si escribes un nombre que no coincide con ningun platillo, sigue rechazandose al salir del
+  campo (sin cambios ahi).
+- Solo cambia `index.html` y `tests/backends.test.js` (ningun parche SQL ni redespliegue de
+  funcion). Pruebas: se reescribieron las que dependian del datalist nativo para probar las
+  sugerencias propias (incluyendo que cada variante de pasta/proteina siga sugiriendo su receta
+  exacta), y toda la suite (`tests/backends.test.js` + `tests/loyverse-sync.test.js`) sigue en
+  verde.
+
 ## [Sin publicar] — rama `feat/panel-usuarios`
 
 ### Agregado — panel de usuarios (crear/editar/eliminar desde la app, solo admin)
