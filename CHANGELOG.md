@@ -3,6 +3,30 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `feat/gesto-atras`
+
+### Agregado — el gesto de "regresar" del celular (o el boton Atras de Android) ahora cierra lo que tengas abierto
+- Antes, deslizar desde el borde para "regresar" no hacia nada (el CSS lo bloqueaba por completo:
+  `overscroll-behavior:none` en toda la pagina y `touch-action:pan-y` en el contenido y en los
+  modales, que le quitan al navegador el control del gesto horizontal) y, aunque se destrabara,
+  la app nunca usaba el historial del navegador -- abrir Ajustes, Loyverse, una receta, etc. no
+  dejaba "pagina" a la que volver.
+- Ahora, abrir cualquier modal o pantalla (Ajustes, Loyverse, Catalogo, editar receta, el panel de
+  usuarios, etc.) registra un paso en el historial del navegador; el gesto de regresar (o el boton
+  fisico/gesto de Android) cierra ese modal y te regresa a donde estabas, igual que el boton "X" o
+  tocar fuera -- quedan sincronizados entre si. Moverse entre pantallas de un mismo flujo (por
+  ejemplo, dentro de Administrar usuarios: lista -> Nuevo usuario -> confirmar con tu contraseña)
+  no apila un paso por cada pantalla: un solo gesto de "atras" cierra todo el flujo de un jalon, en
+  vez de tener que repetirlo pantalla por pantalla. Cerrar con el boton/tocando fuera, sin usar el
+  gesto, tambien libera ese paso -- abrir y cerrar varias veces durante el dia no deja pasos
+  muertos acumulados en el historial.
+- Solo cambia `index.html` (CSS + un enganche en `render()` que mantiene el historial sincronizado
+  con la pantalla que esté abierta, sin tocar `openModal`/`closeModal` ni los demas puntos donde ya
+  se abria o cerraba un modal). Ningun parche SQL ni redespliegue de funcion. Pruebas nuevas en
+  `tests/backends.test.js` (abrir registra el paso, el gesto cierra sin cerrar la sesion, cerrar
+  con boton libera el paso, un flujo de varias pantallas no apila un paso por cada una), mas toda
+  la suite existente (`tests/backends.test.js` + `tests/loyverse-sync.test.js`) en verde.
+
 ## [Sin publicar] — rama `fix/loyverse-emparejar-sugerencias-movil`
 
 ### Corregido (no aparecian sugerencias al emparejar un platillo con Loyverse, en Android)

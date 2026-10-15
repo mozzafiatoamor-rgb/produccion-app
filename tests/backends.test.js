@@ -164,6 +164,26 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(async () => { const r = await Sheets.createUser('admin123', 'U9', 'nuevo', '1234', 'Nuevo Empleado', 'usuario'); return r.usuario === 'nuevo' && S.usuarios.some(u => u.usuario === 'nuevo') }), 'demo: createUser agrega el usuario (local)');
   ok(await pg.evaluate(async () => { try { await Sheets.deleteUser('admin123', 'admin'); return false } catch (e) { return /\u00fanico administrador/.test(e.message) } }), 'demo: deleteUser no deja eliminar al unico admin');
   ok(await pg.evaluate(async () => { await Sheets.deleteUser('admin123', 'nuevo'); return !S.usuarios.some(u => u.usuario === 'nuevo') }), 'demo: deleteUser elimina un usuario normal');
+  // ---- gestos: el boton/gesto de "atras" del celular cierra el modal/pantalla abierta ----
+  const histBase = await pg.evaluate(() => history.state);
+  await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => history.state && history.state.appModal === 'loyverse'), 'gestos: abrir un modal registra un paso en el historial (para que el gesto de "atras" tenga a donde volver)');
+  await pg.goBack(); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === null && !document.getElementById('modal').classList.contains('active')), 'gestos: el gesto de "atras" (el back del navegador/celular) cierra el modal abierto');
+  ok(await pg.evaluate(() => S.screen === 'main' && S.currentUser && S.currentUser.rol === 'admin'), 'gestos: ese "atras" solo cierra el modal, no cierra la sesion ni sale de la app');
+  ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: tras cerrar con el gesto, el historial vuelve exactamente a como estaba antes de abrir el modal');
+  // cerrar con el boton/tocar fuera (closeModal), sin usar el gesto, tambien debe "devolver" ese paso del historial
+  await pg.evaluate(() => openModal('loyverse')); await pg.waitForTimeout(200);
+  await pg.evaluate(() => closeModal()); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === null), 'gestos: cerrar con el boton (sin el gesto) sigue cerrando el modal como antes');
+  ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: cerrar con el boton tambien deja el historial como estaba (no se acumula un paso muerto cada vez que se abre y cierra)');
+  // moverse entre pantallas de un mismo flujo (p.ej. Usuarios -> Nuevo usuario) no debe apilar un paso por cada pantalla
+  await pg.evaluate(() => openModal('usuarios')); await pg.waitForTimeout(200);
+  await pg.evaluate(() => umOpenNew()); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === 'userForm'), 'gestos: "Nuevo usuario" navega a otra pantalla dentro del mismo flujo de administrar usuarios');
+  await pg.goBack(); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === null), 'gestos: un solo "atras" desde esa pantalla cierra todo el flujo (no hace falta repetir el gesto por cada pantalla intermedia)');
+  ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: y el historial vuelve a quedar igual que antes de entrar al flujo de usuarios');
   // resetApp conserva backend
   await pg.evaluate(() => resetApp()); ok(await pg.evaluate(() => localStorage.getItem('backend') === 'demo'), 'demo: resetApp conserva la config del backend');
   await ctx.close();
