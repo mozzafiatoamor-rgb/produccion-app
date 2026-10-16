@@ -184,6 +184,16 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.goBack(); await pg.waitForTimeout(200);
   ok(await pg.evaluate(() => modalType === null), 'gestos: un solo "atras" desde esa pantalla cierra todo el flujo (no hace falta repetir el gesto por cada pantalla intermedia)');
   ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: y el historial vuelve a quedar igual que antes de entrar al flujo de usuarios');
+  // bug real (reportado por Gustavo): Ajustes cierra el modal actual y abre otro en el mismo
+  // click ("Administrar integracion con Loyverse" hace onclick="closeModal();openModal('loyverse')"),
+  // dos llamadas seguidas en el mismo tick -- debe tratarse como una sola transicion (reemplaza el
+  // paso del historial) y no como cerrar-y-perder el modal nuevo
+  await pg.evaluate(() => openModal('settings')); await pg.waitForTimeout(200);
+  await pg.evaluate(() => { closeModal(); openModal('loyverse') }); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => modalType === 'loyverse' && document.getElementById('modal').classList.contains('active')), 'gestos: "closeModal();openModal(x)" en el mismo click (como en Ajustes) SI abre la pantalla nueva, no se queda en home');
+  ok(await pg.evaluate(() => history.state && history.state.appModal === 'loyverse'), 'gestos: ese cambio de pantalla reemplaza el paso del historial (no lo pierde)');
+  await pg.evaluate(() => closeModal()); await pg.waitForTimeout(200);
+  ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: y cerrar esa pantalla deja el historial igual que al principio');
   // resetApp conserva backend
   await pg.evaluate(() => resetApp()); ok(await pg.evaluate(() => localStorage.getItem('backend') === 'demo'), 'demo: resetApp conserva la config del backend');
   await ctx.close();

@@ -3,6 +3,24 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `fix/gesto-atras-cierra-y-abre`
+
+### Corregido (al abrir Loyverse/Usuarios desde Ajustes, la app se iba a Inicio y no abria la ventana)
+- El cambio anterior (gesto de "atras") rompio los botones de Ajustes que cierran la pantalla
+  actual y abren otra en el mismo click (`onclick="closeModal();openModal('loyverse')"`, igual
+  para "Administrar usuarios"): como el cierre disparaba de inmediato un `history.back()`, y el
+  `openModal` siguiente corria *antes* de que ese "atras" terminara, el resultado era que la
+  pantalla nueva nunca se abria y la app regresaba a Inicio -- justo lo que reporto Gustavo con
+  "Administrar integración con Loyverse".
+- Arreglo: la sincronizacion con el historial ya no reacciona a cada cambio al instante; espera a
+  que termine el click completo (cerrar + abrir) y recien ahi decide un solo paso, segun como haya
+  quedado la pantalla al final. Cerrar-y-abrir otra pantalla en el mismo click vuelve a funcionar
+  (y de paso queda mas a prueba de que otro boton futuro haga lo mismo).
+- Solo cambia `index.html` y `tests/backends.test.js`. Prueba nueva que reproduce exactamente el
+  bug reportado (cerrar y abrir otra pantalla en el mismo click SI debe abrirla, no quedarse en
+  Inicio), mas toda la suite existente (`tests/backends.test.js` + `tests/loyverse-sync.test.js`)
+  en verde.
+
 ## [Sin publicar] — rama `feat/gesto-atras`
 
 ### Agregado — el gesto de "regresar" del celular (o el boton Atras de Android) ahora cierra lo que tengas abierto
