@@ -3,6 +3,21 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `feat/compartir-enlace-app`
+
+### Agregado — enlace de la app en Ajustes, para copiar o compartir por WhatsApp
+- Pensado para cuando entra un empleado nuevo: ya no hay que buscar o escribir a mano la
+  direccion de GitHub Pages donde esta publicada la app. Ajustes ahora muestra ese enlace (el que
+  esta usando en ese momento el navegador, sin `index.html` ni parametros extra) con dos botones:
+  "Copiar" (al portapapeles) y "WhatsApp" (abre `wa.me` sin un numero fijo, para elegir el
+  contacto en el momento -- a diferencia del WhatsApp del reporte de turno, que siempre es al
+  mismo numero configurado).
+- Solo cambia `index.html` (CSS/JS, sin tocar `openModal`/`closeModal`) y `tests/backends.test.js`.
+  Ningun parche SQL ni redespliegue de funcion. Pruebas nuevas (el enlace que se muestra es el
+  correcto, copiar lo manda al portapapeles con su aviso, compartir abre wa.me con el enlace en el
+  mensaje) mas toda la suite existente (`tests/backends.test.js` + `tests/loyverse-sync.test.js`)
+  en verde.
+
 ## [Sin publicar] — rama `fix/gesto-atras-cierra-y-abre`
 
 ### Corregido (al abrir Loyverse/Usuarios desde Ajustes, la app se iba a Inicio y no abria la ventana)

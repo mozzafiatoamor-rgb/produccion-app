@@ -194,6 +194,27 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   ok(await pg.evaluate(() => history.state && history.state.appModal === 'loyverse'), 'gestos: ese cambio de pantalla reemplaza el paso del historial (no lo pierde)');
   await pg.evaluate(() => closeModal()); await pg.waitForTimeout(200);
   ok(await pg.evaluate((b) => JSON.stringify(history.state) === JSON.stringify(b), histBase), 'gestos: y cerrar esa pantalla deja el historial igual que al principio');
+  // ---- enlace de la app: copiar o compartir por WhatsApp (para mandarselo a un empleado nuevo) ----
+  await pg.evaluate(() => openModal('settings')); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => { const i = document.querySelector('.modal input[readonly]'); return !!i && i.value === appShareUrl() && appShareUrl() === location.origin + '/' }), 'enlace: Ajustes muestra el enlace de la app (la url actual, sin index.html ni parametros)');
+  const copiedUrl = await pg.evaluate(() => new Promise((resolve) => {
+    const orig = navigator.clipboard;
+    let got = null;
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { got = t; return Promise.resolve() } }, configurable: true });
+    copyAppLink();
+    setTimeout(() => { Object.defineProperty(navigator, 'clipboard', { value: orig, configurable: true }); resolve(got) }, 80);
+  }));
+  ok(copiedUrl === await pg.evaluate(() => appShareUrl()), 'enlace: "Copiar" manda el enlace de la app al portapapeles');
+  ok(await pg.evaluate(() => document.getElementById('toast').textContent.includes('Enlace copiado')), 'enlace: avisa que ya se copio');
+  const waUrl = await pg.evaluate(() => new Promise((resolve) => {
+    const orig = window.open;
+    window.open = (u) => { window.open = orig; resolve(u) };
+    shareAppLinkWhatsapp();
+    setTimeout(() => { window.open = orig; resolve(null) }, 300);
+  }));
+  const appUrl = await pg.evaluate(() => appShareUrl());
+  ok(!!waUrl && waUrl.indexOf('https://wa.me/?text=') === 0 && decodeURIComponent(waUrl.split('text=')[1]).indexOf(appUrl) !== -1, 'enlace: "WhatsApp" abre wa.me sin numero fijo (para elegir el contacto) con el enlace en el mensaje');
+  await pg.evaluate(() => closeModal());
   // resetApp conserva backend
   await pg.evaluate(() => resetApp()); ok(await pg.evaluate(() => localStorage.getItem('backend') === 'demo'), 'demo: resetApp conserva la config del backend');
   await ctx.close();
