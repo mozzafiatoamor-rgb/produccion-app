@@ -3,6 +3,27 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada cambio se hace en
 una rama y se registra aquí y en git. `main` = producción (no se modifica sin aprobación).
 
+## [Sin publicar] — rama `feat/credenciales-usuario-whatsapp`
+
+### Agregado — mandar usuario y contraseña por WhatsApp desde "Administrar usuarios"
+- Al crear un usuario nuevo, o al cambiarle la contraseña a uno existente desde el panel de
+  Usuarios, ahora aparece una pantalla "Acceso listo para <nombre>" con el usuario y la
+  contraseña recien puesta (para copiarlos a mano si hace falta) y un boton "Enviar por
+  WhatsApp" que abre `wa.me` (sin numero fijo, se elige el contacto en el momento, igual que
+  el enlace para compartir la app) con un mensaje listo: el enlace de la app + usuario +
+  contraseña, para mandarselo de un jalon al empleado nuevo.
+- Solo aparece cuando hay una contraseña nueva que avisar: crear un usuario siempre la muestra;
+  editar uno sin tocar su contraseña regresa directo a la lista como antes, porque no hay nada
+  nuevo que enviar. Eliminar un usuario tampoco la muestra.
+- La contraseña en texto plano solo vive un instante en memoria (nunca se guarda ni se puede
+  recuperar despues: el servidor solo guarda el hash) -- por eso la pantalla solo puede
+  aparecer justo despues de ponerla, no en cualquier momento.
+- Solo cambia `index.html` (CSS/JS) y `tests/backends.test.js`. Ningun parche SQL ni
+  redespliegue de funcion. Pruebas nuevas (crear usuario ofrece enviar sus credenciales;
+  editar sin cambiar la contraseña no la ofrece; cambiar la contraseña al editar si la ofrece;
+  el mensaje de WhatsApp trae usuario + contraseña + enlace de la app) mas toda la suite
+  existente (`tests/backends.test.js` + `tests/loyverse-sync.test.js`) en verde.
+
 ## [Sin publicar] — rama `feat/compartir-enlace-app`
 
 ### Agregado — enlace de la app en Ajustes, para copiar o compartir por WhatsApp

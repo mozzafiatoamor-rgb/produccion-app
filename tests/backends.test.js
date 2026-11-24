@@ -215,6 +215,40 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   const appUrl = await pg.evaluate(() => appShareUrl());
   ok(!!waUrl && waUrl.indexOf('https://wa.me/?text=') === 0 && decodeURIComponent(waUrl.split('text=')[1]).indexOf(appUrl) !== -1, 'enlace: "WhatsApp" abre wa.me sin numero fijo (para elegir el contacto) con el enlace en el mensaje');
   await pg.evaluate(() => closeModal());
+  // ---- credenciales: tras crear (o cambiarle la contrasena a) un usuario, se puede mandarle usuario+contrasena+enlace por WhatsApp ----
+  await pg.evaluate(() => umOpenNew()); await pg.waitForTimeout(200);
+  await pg.fill('#umU', 'carlos'); await pg.fill('#umN', 'Carlos Empleado'); await pg.fill('#umP', 'clave123');
+  await pg.evaluate(() => umSubmitForm()); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === 'userAuth'), 'credenciales: crear usuario pide la contraseña del admin para confirmar');
+  await pg.fill('#umAuthPass', 'admin123');
+  await pg.evaluate(() => umConfirmAuth(document.getElementById('umAuthPass').value)); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => modalType === 'userCred' && S._umCred && S._umCred.usuario === 'carlos' && S._umCred.password === 'clave123'), 'credenciales: tras crear el usuario, muestra una pantalla con el usuario y la contraseña recien puesta');
+  ok(await pg.evaluate(() => { const inputs = [...document.querySelectorAll('.modal input[readonly]')]; return inputs.some(i => i.value === 'carlos') && inputs.some(i => i.value === 'clave123') }), 'credenciales: los campos muestran el usuario y la contraseña para copiarlos a mano si hace falta');
+  const waCredUrl = await pg.evaluate(() => new Promise((resolve) => {
+    const orig = window.open;
+    window.open = (u) => { window.open = orig; resolve(u) };
+    umSendCredWhatsapp();
+    setTimeout(() => { window.open = orig; resolve(null) }, 300);
+  }));
+  ok(!!waCredUrl && waCredUrl.indexOf('https://wa.me/?text=') === 0 && (() => { const t = decodeURIComponent(waCredUrl.split('text=')[1]); return t.indexOf('carlos') !== -1 && t.indexOf('clave123') !== -1 && t.indexOf(appUrl) !== -1 })(), 'credenciales: "Enviar por WhatsApp" manda el usuario, la contraseña y el enlace de la app en el mensaje');
+  await pg.evaluate(() => { S._umCred = null; openModal('usuarios') }); await pg.waitForTimeout(200);
+  ok(await pg.evaluate(() => modalType === 'usuarios'), 'credenciales: "Listo" regresa a la lista de usuarios');
+  // editar sin tocar la contrasena no debe ofrecer enviarla (no hay nada nuevo que mandar)
+  await pg.evaluate(() => umOpenEdit('carlos')); await pg.waitForTimeout(200);
+  await pg.evaluate(() => umSubmitForm()); await pg.waitForTimeout(200);
+  await pg.fill('#umAuthPass', 'admin123');
+  await pg.evaluate(() => umConfirmAuth(document.getElementById('umAuthPass').value)); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => modalType === 'usuarios' && !S._umCred), 'credenciales: editar sin poner una contraseña nueva regresa directo a la lista (no hay contraseña nueva que enviar)');
+  // editar poniendo una contrasena nueva si debe ofrecer enviarla
+  await pg.evaluate(() => umOpenEdit('carlos')); await pg.waitForTimeout(200);
+  await pg.fill('#umP', 'clave456');
+  await pg.evaluate(() => umSubmitForm()); await pg.waitForTimeout(200);
+  await pg.fill('#umAuthPass', 'admin123');
+  await pg.evaluate(() => umConfirmAuth(document.getElementById('umAuthPass').value)); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => modalType === 'userCred' && S._umCred && S._umCred.password === 'clave456'), 'credenciales: cambiar la contraseña al editar si ofrece enviar la nueva por WhatsApp');
+  await pg.evaluate(async () => { S._umCred = null; await Sheets.deleteUser('admin123', 'carlos') }); await pg.waitForTimeout(200);
+  await pg.evaluate(() => openModal('usuarios')); await pg.waitForTimeout(200);
+  await pg.evaluate(() => closeModal());
   // resetApp conserva backend
   await pg.evaluate(() => resetApp()); ok(await pg.evaluate(() => localStorage.getItem('backend') === 'demo'), 'demo: resetApp conserva la config del backend');
   await ctx.close();
@@ -322,7 +356,8 @@ let fails = 0; function ok(c, m) { console.log((c ? 'PASS ' : 'FAIL ') + m); if 
   await pg.evaluate(() => umConfirmAuth('mala'));
   ok(users.length === 1 && await pg.evaluate(() => modalType === 'userAuth'), 'um/sb: contraseña de admin incorrecta no crea el usuario');
   await pg.evaluate(() => umConfirmAuth('secreto'));
-  ok(users.length === 2 && users[1].usuario === 'maria' && users[1].rol === 'usuario' && await pg.evaluate(() => modalType === 'usuarios'), 'um/sb: contraseña correcta crea el usuario y vuelve a la lista');
+  ok(users.length === 2 && users[1].usuario === 'maria' && users[1].rol === 'usuario' && await pg.evaluate(() => modalType === 'userCred' && S._umCred && S._umCred.usuario === 'maria' && S._umCred.password === '1234'), 'um/sb: contraseña correcta crea el usuario y muestra la pantalla para enviarle el acceso por WhatsApp');
+  await pg.evaluate(() => { S._umCred = null; openModal('usuarios') });
   ok(DBM.bitacora.some(b => /Usuario creado/.test(JSON.stringify(b))), 'um/sb: la creacion queda en la bitacora');
   await pg.evaluate(() => umOpenNew());
   await pg.evaluate(() => { document.getElementById('umU').value = 'MARIA'; document.getElementById('umN').value = 'Otra'; document.getElementById('umP').value = '5678'; });
